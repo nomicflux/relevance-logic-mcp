@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "relevance-logic": {
+      "command": "node",
+      "args": ["/Users/demouser/Code/relevance-logic-mcp/build/index.js"],
+      "env": {}
+    }
+  }
+}
