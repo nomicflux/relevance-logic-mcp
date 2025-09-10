@@ -12,7 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { NaturalLanguageParser } from "./parser/nlp-parser.js";
 import { FormulaUtils } from "./logic/formula.js";
-import { LogicSystem, LogicFormula } from "./types.js";
+import { LogicFormula, SystemRValidation } from "./types.js";
 
 class RelevanceLogicServer {
   private server: Server;
@@ -86,12 +86,6 @@ class RelevanceLogicServer {
                   type: "string",
                   description: "Logical argument with premises and conclusion",
                 },
-                system: {
-                  type: "string",
-                  enum: ["relevance_B", "relevance_T", "relevance_E", "relevance_R"],
-                  description: "Relevance logic system: B=basic, T=ticketing, E=entailment, R=strongest",
-                  default: "relevance_R"
-                },
               },
               required: ["argument"],
             },
@@ -136,18 +130,13 @@ class RelevanceLogicServer {
           },
           {
             name: "diagnose_gaps",
-            description: "Identify and fill logical gaps in complex explanations. Use when reasoning feels incomplete or when multiple claims need stronger connecting logic.",
+            description: "Identify logical gaps using System R ternary relation requirements. Provides purely syntactic analysis without domain-specific rules.",
             inputSchema: {
               type: "object",
               properties: {
                 argument: {
                   type: "string",
-                  description: "Natural language argument to diagnose",
-                },
-                domain: {
-                  type: "string",
-                  description: "Domain context (e.g., 'biology', 'mathematics', 'ethics')",
-                  default: "general"
+                  description: "Natural language argument to diagnose for System R compliance",
                 },
               },
               required: ["argument"],
@@ -192,14 +181,13 @@ class RelevanceLogicServer {
           // Step 3: Validate the logic
           const validation = this.strictValidation(
             structured.premises.map(p => p.formula),
-            structured.conclusion.formula,
-            "relevance_R"
+            structured.conclusion.formula
           );
           
           // Step 4: If invalid, diagnose gaps
           let gapAnalysis = null;
           if (!validation.validation.overallValid) {
-            gapAnalysis = this.diagnoseLogicalGaps(task, context || "general");
+            gapAnalysis = this.diagnoseLogicalGaps(task);
           }
           
           return {
@@ -253,9 +241,8 @@ class RelevanceLogicServer {
         }
 
         case "validate_argument": {
-          const { argument, system = "relevance_R" } = args as { 
-            argument: string, 
-            system?: LogicSystem 
+          const { argument } = args as { 
+            argument: string
           };
           
           const parsedArg = this.parser.parseArgument(argument);
@@ -263,11 +250,11 @@ class RelevanceLogicServer {
           const conclusion = parsedArg.conclusion.formula;
           
           // STRICT VALIDATION
-          const validation = this.strictValidation(premises, conclusion, system);
+          const validation = this.strictValidation(premises, conclusion);
           
           // If invalid, automatically include detailed gap analysis
           if (!validation.validation.overallValid) {
-            (validation as any).automaticGapAnalysis = this.diagnoseLogicalGaps(argument, "general");
+            (validation as any).automaticGapAnalysis = this.diagnoseLogicalGaps(argument);
           }
           
           return {
@@ -314,9 +301,9 @@ class RelevanceLogicServer {
         }
 
         case "diagnose_gaps": {
-          const { argument, domain = "general" } = args as { argument: string, domain?: string };
+          const { argument } = args as { argument: string };
           
-          const gapAnalysis = this.diagnoseLogicalGaps(argument, domain);
+          const gapAnalysis = this.diagnoseLogicalGaps(argument);
           
           return {
             content: [
@@ -436,54 +423,61 @@ Do this validation transparently, then present the improved reasoning.`
     });
   }
 
-  private strictValidation(premises: LogicFormula[], conclusion: LogicFormula, system: LogicSystem) {
+  private strictValidation(premises: LogicFormula[], conclusion: LogicFormula) {
+    // SYSTEM R TERNARY RELATION VALIDATION - This is the CORRECT implementation
+    const systemRValidation = FormulaUtils.validateSystemR(premises, conclusion);
+    
     const analysis = {
-      version: "2.0.0 - STRICT RELEVANCE LOGIC COMPLIANCE",
-      system: system,
+      version: "2.0.0 - SYSTEM R TERNARY RELATION SEMANTICS",
       argument: {
         premises: premises.map(p => FormulaUtils.toString(p)),
         conclusion: FormulaUtils.toString(conclusion)
       },
       validation: {
-        exactSyntacticSharing: false,
-        systemSpecificValid: false,
-        structurallyValid: false,
-        overallValid: false
+        systemRCompliant: systemRValidation.isValid,
+        ternaryRelationsValid: systemRValidation.ternaryRelations.length === premises.length,
+        overallValid: systemRValidation.isValid
       },
       errors: [] as string[],
       warnings: [] as string[],
-      details: {} as any
+      details: {
+        ternaryRelations: systemRValidation.ternaryRelations.map(tr => ({
+          source: FormulaUtils.toString(tr.source),
+          target: FormulaUtils.toString(tr.target),
+          sharedAtoms: tr.context.sharedAtoms.map(atom => FormulaUtils.toString(atom)),
+          informationFlow: tr.context.informationFlow,
+          relevanceStrength: tr.context.relevanceStrength
+        })),
+        violatedConstraints: systemRValidation.violatedConstraints,
+        relevanceMap: Object.fromEntries(systemRValidation.relevanceMap)
+      }
     };
 
-    // 1. EXACT SYNTACTIC SHARING CHECK (CRITICAL)
-    const hasExactSharing = this.checkExactSyntacticSharing(premises, conclusion);
-    analysis.validation.exactSyntacticSharing = hasExactSharing;
-    analysis.details.sharingAnalysis = this.analyzeSyntacticSharing(premises, conclusion);
-
-    if (!hasExactSharing) {
-      analysis.errors.push("RELEVANCE VIOLATION: No exact syntactic sharing of atomic formulas between premises and conclusion");
-      analysis.warnings.push("This violates the fundamental variable sharing principle of relevance logic");
+    // Add errors for System R violations
+    if (!systemRValidation.isValid) {
+      analysis.errors.push("SYSTEM R VIOLATION: Argument fails ternary relation requirements");
+      systemRValidation.violatedConstraints.forEach(constraint => {
+        analysis.errors.push(constraint);
+      });
+      analysis.warnings.push("System R requires every premise to establish a ternary relation with the conclusion through shared atomic formulas");
     }
-
-    // 2. SYSTEM-SPECIFIC VALIDATION
-    analysis.validation.systemSpecificValid = this.validateForSystem(premises, conclusion, system);
-    if (!analysis.validation.systemSpecificValid) {
-      analysis.errors.push(`Invalid in ${system}: Violates system-specific constraints`);
-    }
-
-    // 3. STRUCTURAL VALIDATION
-    analysis.validation.structurallyValid = hasExactSharing; // Simplified
-    
-    // 4. OVERALL VALIDATION
-    analysis.validation.overallValid = hasExactSharing && 
-                                        analysis.validation.systemSpecificValid && 
-                                        analysis.validation.structurallyValid;
 
     return analysis;
   }
 
   private checkExactSyntacticSharing(premises: LogicFormula[], conclusion: LogicFormula): boolean {
-    return premises.some(premise => FormulaUtils.hasExactAtomicSharing(premise, conclusion));
+    // Variable Sharing Principle (binary constraint):
+    // EVERY premise must share at least one atomic formula with the conclusion
+    // If ANY premise lacks sharing, the entire argument is invalid in relevance logic
+    
+    for (const premise of premises) {
+      const hasSharing = FormulaUtils.hasExactAtomicSharing(premise, conclusion);
+      if (!hasSharing) {
+        return false; // Invalid: this premise is irrelevant to the conclusion
+      }
+    }
+    
+    return true; // Valid: all premises satisfy the variable sharing requirement
   }
 
   private analyzeSyntacticSharing(premises: LogicFormula[], conclusion: LogicFormula) {
@@ -501,7 +495,6 @@ Do this validation transparently, then present the improved reasoning.`
           atomicFormulas: premiseAtoms.map(a => FormulaUtils.toString(a)),
           sharedAtomicFormulas: sharedAtoms.map(a => FormulaUtils.toString(a)),
           hasExactSharing: sharedAtoms.length > 0,
-          sharingStrength: sharedAtoms.length / Math.max(premiseAtoms.length, 1)
         };
       }),
       overallSharing: premises.some(premise => FormulaUtils.hasExactAtomicSharing(premise, conclusion))
@@ -510,50 +503,7 @@ Do this validation transparently, then present the improved reasoning.`
     return analysis;
   }
 
-  private validateForSystem(premises: LogicFormula[], conclusion: LogicFormula, system: LogicSystem): boolean {
-    // Simplified system-specific validation
-    switch (system) {
-      case 'relevance_B':
-        // System B: Only allows identity A → A
-        return this.isIdentityInference(premises, conclusion);
-        
-      case 'relevance_T':
-        // System T: Allows identity and contraction
-        return this.isIdentityInference(premises, conclusion) || 
-               this.isContractionInference(premises, conclusion);
-        
-      case 'relevance_E':
-      case 'relevance_R':
-        // Systems E and R: Allow more complex inferences
-        return this.checkExactSyntacticSharing(premises, conclusion);
-        
-      default:
-        return true; // Classical logic
-    }
-  }
 
-  private isIdentityInference(premises: LogicFormula[], conclusion: LogicFormula): boolean {
-    // A → A is always valid
-    return premises.some(premise => 
-      FormulaUtils.toString(premise) === FormulaUtils.toString(conclusion)
-    );
-  }
-
-  private isContractionInference(premises: LogicFormula[], conclusion: LogicFormula): boolean {
-    // A → A ∧ A pattern
-    if (conclusion.type === 'compound' && conclusion.operator === 'and' && 
-        conclusion.subformulas && conclusion.subformulas.length === 2) {
-      const left = conclusion.subformulas[0];
-      const right = conclusion.subformulas[1];
-      
-      // Check if both conjuncts match some premise
-      return premises.some(premise => 
-        FormulaUtils.toString(premise) === FormulaUtils.toString(left) &&
-        FormulaUtils.toString(premise) === FormulaUtils.toString(right)
-      );
-    }
-    return false;
-  }
 
   private structureArgument(argument: string, context: string) {
     const parsedArg = this.parser.parseArgument(argument);
@@ -667,12 +617,12 @@ Do this validation transparently, then present the improved reasoning.`
     const premiseAtoms = premises.flatMap(p => FormulaUtils.extractAtomicFormulas(p));
     const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
     
-    const hasAnyPredicateSharing = premiseAtoms.some(pAtom => 
-      conclusionAtoms.some(cAtom => pAtom.predicate === cAtom.predicate)
+    const hasAnyAtomicSharing = premiseAtoms.some(pAtom => 
+      conclusionAtoms.some(cAtom => FormulaUtils.atomicFormulasIdentical(pAtom, cAtom))
     );
     
-    if (!hasAnyPredicateSharing) {
-      issues.push("No predicate sharing between premises and conclusion - likely relevance violation");
+    if (!hasAnyAtomicSharing) {
+      issues.push("No exact atomic formula sharing between premises and conclusion - System R violation");
     }
     
     // Check for complex nested structures that might need clarification
@@ -700,16 +650,15 @@ Do this validation transparently, then present the improved reasoning.`
     return recommendations;
   }
 
-  private diagnoseLogicalGaps(argument: string, domain: string) {
+  private diagnoseLogicalGaps(argument: string) {
     const parsedArg = this.parser.parseArgument(argument);
     const premises = parsedArg.premises.map(p => p.formula);
     const conclusion = parsedArg.conclusion.formula;
 
     const diagnosis = {
-      version: "2.0.0 - LOGICAL GAP DIAGNOSTIC TOOL",
+      version: "2.0.0 - SYSTEM R GAP DIAGNOSTIC TOOL",
       input: {
-        originalArgument: argument,
-        domain: domain
+        originalArgument: argument
       },
       parsed: {
         premiseCount: premises.length,
@@ -728,11 +677,11 @@ Do this validation transparently, then present the improved reasoning.`
       gapAnalysis: {
         syntacticSharing: this.analyzeSyntacticGaps(premises, conclusion),
         logicalBridges: this.identifyMissingBridges(premises, conclusion),
-        implicitPremises: this.identifyMissingPremises(premises, conclusion, domain),
+        implicitPremises: this.identifyMissingPremises(premises, conclusion),
         quantifierIssues: this.analyzeQuantifierGaps(premises, conclusion),
         structuralIssues: this.analyzeStructuralGaps(premises, conclusion)
       },
-      recommendations: this.generateGapRepairRecommendations(premises, conclusion, domain)
+      recommendations: this.generateGapRepairRecommendations(premises, conclusion)
     };
 
     return diagnosis;
@@ -750,12 +699,11 @@ Do this validation transparently, then present the improved reasoning.`
     const unsharedPredicates = new Set<string>();
     
     conclusionAtoms.forEach(cAtom => {
-      const hasSharing = premiseAtoms.some(pAtom => 
-        pAtom.predicate === cAtom.predicate && 
-        (pAtom.terms?.length || 0) === (cAtom.terms?.length || 0)
+      const hasExactSharing = premiseAtoms.some(pAtom => 
+        FormulaUtils.atomicFormulasIdentical(pAtom, cAtom)
       );
       
-      if (hasSharing) {
+      if (hasExactSharing) {
         sharedPredicates.add(cAtom.predicate!);
       } else {
         unsharedPredicates.add(cAtom.predicate!);
@@ -778,34 +726,29 @@ Do this validation transparently, then present the improved reasoning.`
     const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
     const premiseAtoms = premises.flatMap(p => FormulaUtils.extractAtomicFormulas(p));
 
-    // Check for predicates that appear in conclusion but not premises
+    // Check for atomic formulas that appear in conclusion but not exactly in premises
     conclusionAtoms.forEach(cAtom => {
-      const matchingPredicates = premiseAtoms.filter(pAtom => 
-        pAtom.predicate === cAtom.predicate
+      const hasExactMatch = premiseAtoms.some(pAtom => 
+        FormulaUtils.atomicFormulasIdentical(pAtom, cAtom)
       );
       
-      if (matchingPredicates.length === 0) {
-        bridges.push({
-          type: "MISSING_PREDICATE_BRIDGE",
-          description: `Conclusion uses predicate '${cAtom.predicate}' but no premise provides it`,
-          suggestedPremise: `Need a premise that establishes ${FormulaUtils.toString(cAtom)} or connects to it`
-        });
-      } else {
-        // Check for term/variable mismatches
-        const hasExactMatch = matchingPredicates.some(pAtom => 
-          FormulaUtils.atomicFormulasIdentical(pAtom, cAtom)
+      if (!hasExactMatch) {
+        // Check if similar predicates exist (for diagnostic purposes only)
+        const similarPredicates = premiseAtoms.filter(pAtom => 
+          pAtom.predicate === cAtom.predicate
         );
         
-        if (!hasExactMatch) {
-          const termMismatches = matchingPredicates.map(pAtom => ({
-            premise: FormulaUtils.toString(pAtom),
-            conclusion: FormulaUtils.toString(cAtom)
-          }));
-          
+        if (similarPredicates.length === 0) {
           bridges.push({
-            type: "TERM_BRIDGE_NEEDED",
-            description: `Predicate '${cAtom.predicate}' exists but with different terms`,
-            suggestedPremise: `Need to connect: ${termMismatches.map(m => `${m.premise} relates to ${m.conclusion}`).join(', ')}`
+            type: "MISSING_ATOMIC_FORMULA",
+            description: `Conclusion requires atomic formula '${FormulaUtils.toString(cAtom)}' but no premise provides it`,
+            suggestedPremise: `Need premise containing exactly: ${FormulaUtils.toString(cAtom)}`
+          });
+        } else {
+          bridges.push({
+            type: "ATOMIC_FORMULA_MISMATCH", 
+            description: `Predicate '${cAtom.predicate}' exists but atomic formula '${FormulaUtils.toString(cAtom)}' not exactly matched`,
+            suggestedPremise: `Need premise with exact atomic formula: ${FormulaUtils.toString(cAtom)}`
           });
         }
       }
@@ -814,16 +757,13 @@ Do this validation transparently, then present the improved reasoning.`
     return {
       missingBridges: bridges,
       bridgeCount: bridges.length,
-      criticalityLevel: bridges.some(b => b.type === "MISSING_PREDICATE_BRIDGE") ? "HIGH" : 
+      criticalityLevel: bridges.some(b => b.type === "MISSING_ATOMIC_FORMULA") ? "HIGH" : 
                        bridges.length > 0 ? "MEDIUM" : "LOW"
     };
   }
 
-  private identifyMissingPremises(premises: LogicFormula[], conclusion: LogicFormula, domain: string) {
+  private identifyMissingPremises(premises: LogicFormula[], conclusion: LogicFormula) {
     const missing: { type: string, premise: string, justification: string }[] = [];
-    
-    // Analyze based on domain knowledge
-    const domainRules = this.getDomainKnowledge(domain);
     
     const conclusionStr = FormulaUtils.toString(conclusion);
     const premiseStrs = premises.map(p => FormulaUtils.toString(p));
@@ -936,33 +876,15 @@ Do this validation transparently, then present the improved reasoning.`
     };
   }
 
-  private getDomainKnowledge(domain: string): { rules: string[], concepts: string[] } {
-    const domainMap: { [key: string]: { rules: string[], concepts: string[] } } = {
-      biology: {
-        rules: ["All mammals are animals", "All dogs are mammals", "Species hierarchy"],
-        concepts: ["species", "genus", "classification", "inheritance"]
-      },
-      mathematics: {
-        rules: ["Transitivity", "Symmetry", "Reflexivity", "Equivalence relations"],
-        concepts: ["equality", "greater than", "set membership", "functions"]
-      },
-      general: {
-        rules: ["Identity", "Universal instantiation", "Modus ponens"],
-        concepts: ["identity", "class membership", "properties"]
-      }
-    };
-    
-    return domainMap[domain] || domainMap.general;
-  }
 
-  private generateGapRepairRecommendations(premises: LogicFormula[], conclusion: LogicFormula, domain: string): string[] {
+  private generateGapRepairRecommendations(premises: LogicFormula[], conclusion: LogicFormula): string[] {
     const recommendations: string[] = [];
     
     const hasSharing = premises.some(p => FormulaUtils.hasExactAtomicSharing(p, conclusion));
     
     if (!hasSharing) {
-      recommendations.push("CRITICAL: Add premises that share atomic formulas with the conclusion");
-      recommendations.push("Identify what connects your premises to your conclusion logically");
+      recommendations.push("CRITICAL: Add premises that share exact atomic formulas with the conclusion");
+      recommendations.push("System R requires ternary relations - premises must connect to conclusion through shared content");
     }
     
     const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
@@ -974,15 +896,12 @@ Do this validation transparently, then present the improved reasoning.`
       );
       
       if (!hasMatch) {
-        recommendations.push(`Add a premise that establishes or leads to: ${FormulaUtils.toString(cAtom)}`);
+        recommendations.push(`Add premise containing exactly: ${FormulaUtils.toString(cAtom)}`);
       }
     });
     
-    if (domain !== "general") {
-      recommendations.push(`Consider ${domain}-specific rules and relationships`);
-    }
-    
-    recommendations.push("Ensure all terms and predicates are properly defined and connected");
+    recommendations.push("All reasoning must be purely syntactic - no domain-specific rules allowed in System R");
+    recommendations.push("Ensure exact variable identity between premises and conclusion");
     
     return recommendations;
   }
@@ -1197,6 +1116,9 @@ Do this validation transparently, then present the improved reasoning.`
     console.error("Relevance Logic MCP server running on stdio");
   }
 }
+
+// Export the class for testing
+export { RelevanceLogicServer };
 
 const server = new RelevanceLogicServer();
 server.run().catch((error) => {

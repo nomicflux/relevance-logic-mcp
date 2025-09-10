@@ -18,13 +18,6 @@ export type LogicalOperator =
   | 'forall'            // ∀ (universal quantification)
   | 'exists';           // ∃ (existential quantification)
 
-export type LogicSystem = 
-  | 'classical'
-  // Relevance logic systems (hierarchical)
-  | 'relevance_B'       // Basic relevance logic (weakest)
-  | 'relevance_T'       // Ticketing logic (+ contraction)  
-  | 'relevance_E'       // Entailment logic (+ entailment axioms)
-  | 'relevance_R';      // Relevant implication (strongest, + distribution)
 
 export interface Variable {
   name: string;
@@ -62,7 +55,6 @@ export interface ValidationResult {
   hasRelevance: boolean;
   errors: string[];
   warnings: string[];
-  relevanceScore: number;
 }
 
 export interface ParsedStatement {
@@ -71,4 +63,24 @@ export interface ParsedStatement {
   assumptions: LogicFormula[];
   ambiguities: string[];
   confidence: number;
+}
+
+// System R Ternary Relation Semantics - REQUIRED for proper relevance logic
+export interface TernaryRelation {
+  source: LogicFormula;      // Information source (premise)
+  context: RelevanceContext; // Relevance mediator (shared content)
+  target: LogicFormula;      // Information target (conclusion)
+}
+
+export interface RelevanceContext {
+  sharedAtoms: LogicFormula[];              // Exact atomic formulas that establish relevance
+  informationFlow: 'direct' | 'mediated';  // How information flows between source and target
+  relevanceStrength: number;                // 0-1 measure of connection strength
+}
+
+export interface SystemRValidation {
+  isValid: boolean;
+  ternaryRelations: TernaryRelation[];
+  violatedConstraints: string[];
+  relevanceMap: Map<string, RelevanceContext>;
 }

@@ -1,4 +1,4 @@
-import { LogicFormula, LogicalOperator, Variable, Term } from '../types.js';
+import { LogicFormula, LogicalOperator, Variable, Term, TernaryRelation, RelevanceContext, SystemRValidation } from '../types.js';
 
 export class FormulaBuilder {
   private static idCounter = 0;
@@ -167,18 +167,28 @@ export class FormulaUtils {
   }
 
   /**
-   * Check if two atomic formulas have syntactic sharing in relevance logic
-   * In relevance logic, predicate sharing with same arity constitutes valid sharing
+   * Check if two atomic formulas are EXACTLY IDENTICAL for relevance logic variable sharing
+   * This is the FINAL arbiter of sharing - no other checks follow this function
+   * Must enforce Variable Sharing Principle: exact propositional variable identity required
    */
   static atomicFormulasIdentical(atom1: LogicFormula, atom2: LogicFormula): boolean {
     if (atom1.type !== 'atomic' || atom2.type !== 'atomic') return false;
     if (atom1.predicate !== atom2.predicate) return false;
     
-    // Check arity matches - same predicate with same number of arguments
-    const arity1 = atom1.terms?.length || 0;
-    const arity2 = atom2.terms?.length || 0;
+    // Must check EXACT term identity - same variables, same constants
+    // P(x) and P(y) do NOT share variables and must be rejected
+    const terms1 = atom1.terms || [];
+    const terms2 = atom2.terms || [];
     
-    return arity1 === arity2;
+    if (terms1.length !== terms2.length) return false;
+    
+    for (let i = 0; i < terms1.length; i++) {
+      if (terms1[i].type !== terms2[i].type || terms1[i].name !== terms2[i].name) {
+        return false;
+      }
+    }
+    
+    return true;
   }
 
   /**
@@ -288,5 +298,90 @@ export class FormulaUtils {
     }
     
     return freeVars;
+  }
+
+  // SYSTEM R TERNARY RELATION SEMANTICS IMPLEMENTATION
+  // Citation: "Uses three-place relation on possible worlds to evaluate logical implications"
+  
+  /**
+   * Create ternary relation between source (premise), context (shared content), and target (conclusion)
+   * This is the CORE of System R relevance logic - information must flow through shared content
+   */
+  static createTernaryRelation(source: LogicFormula, target: LogicFormula): TernaryRelation | null {
+    const sharedAtoms = this.getSharedAtomicFormulas(source, target);
+    
+    if (sharedAtoms.length === 0) {
+      return null; // No relevance relation possible
+    }
+    
+    const context: RelevanceContext = {
+      sharedAtoms: sharedAtoms,
+      informationFlow: 'direct', // Direct sharing of atomic formulas
+      relevanceStrength: sharedAtoms.length / (this.extractAtomicFormulas(source).length + this.extractAtomicFormulas(target).length)
+    };
+    
+    return {
+      source: source,
+      context: context,
+      target: target
+    };
+  }
+  
+  /**
+   * Validate argument using System R ternary relation semantics
+   * EVERY premise must have a valid ternary relation to the conclusion
+   */
+  static validateSystemR(premises: LogicFormula[], conclusion: LogicFormula): SystemRValidation {
+    const ternaryRelations: TernaryRelation[] = [];
+    const violatedConstraints: string[] = [];
+    const relevanceMap = new Map<string, RelevanceContext>();
+    
+    // SYSTEM R REQUIREMENT: Every premise must establish ternary relation with conclusion
+    for (let i = 0; i < premises.length; i++) {
+      const premise = premises[i];
+      const relation = this.createTernaryRelation(premise, conclusion);
+      
+      if (!relation) {
+        violatedConstraints.push(`Premise ${i + 1} has no ternary relation to conclusion - violates System R`);
+      } else {
+        ternaryRelations.push(relation);
+        relevanceMap.set(`premise_${i}`, relation.context);
+      }
+    }
+    
+    const isValid = violatedConstraints.length === 0 && ternaryRelations.length === premises.length;
+    
+    return {
+      isValid: isValid,
+      ternaryRelations: ternaryRelations,
+      violatedConstraints: violatedConstraints,
+      relevanceMap: relevanceMap
+    };
+  }
+  
+  /**
+   * Check if ternary relation satisfies System R constraints
+   * Information must flow properly through shared atomic formulas
+   */
+  static isValidTernaryRelation(relation: TernaryRelation): boolean {
+    // Must have at least one shared atomic formula for information flow
+    if (relation.context.sharedAtoms.length === 0) {
+      return false;
+    }
+    
+    // Shared atoms must be EXACTLY identical (not just similar predicates)
+    for (const sharedAtom of relation.context.sharedAtoms) {
+      const sourceAtoms = this.extractAtomicFormulas(relation.source);
+      const targetAtoms = this.extractAtomicFormulas(relation.target);
+      
+      const inSource = sourceAtoms.some(atom => this.atomicFormulasIdentical(atom, sharedAtom));
+      const inTarget = targetAtoms.some(atom => this.atomicFormulasIdentical(atom, sharedAtom));
+      
+      if (!inSource || !inTarget) {
+        return false; // Shared atom must appear exactly in both source and target
+      }
+    }
+    
+    return true;
   }
 }
