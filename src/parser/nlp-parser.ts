@@ -16,6 +16,7 @@ export class NaturalLanguageParser {
   }
 
   private initializePatterns(): void {
+    // Initialize base patterns first
     this.patterns = [
       {
         pattern: /^all (\w+) (?:are|can|will|have) (.+)$/i,
@@ -32,6 +33,23 @@ export class NaturalLanguageParser {
           return FormulaBuilder.forall(variable, implication, match[0]);
         },
         description: "Universal quantification: 'All X are Y'"
+      },
+      
+      {
+        pattern: /^all (\w+) (.+)$/i,
+        builder: (match, vars) => {
+          const entityType = match[1].toLowerCase();
+          const property = this.normalizeProperty(match[2]);
+          const variable = this.getVariable(entityType, vars);
+          
+          // Create: ∀x (EntityType(x) → Property(x))
+          const entityPredicate = FormulaBuilder.atomic(entityType, [{ type: 'variable', name: variable }]);
+          const propertyPredicate = FormulaBuilder.atomic(property, [{ type: 'variable', name: variable }]);
+          const implication = FormulaBuilder.relevantImplies(entityPredicate, propertyPredicate);
+          
+          return FormulaBuilder.forall(variable, implication, match[0]);
+        },
+        description: "Universal quantification: 'All X Y'"
       },
       
       {
@@ -108,22 +126,9 @@ export class NaturalLanguageParser {
         builder: (match, vars) => {
           const subject = match[1].toLowerCase();
           const property = this.normalizeProperty(match[2]);
-          const term: Term = this.isVariable(subject) 
-            ? { type: 'variable', name: this.getVariable(subject, vars) }
-            : { type: 'constant', name: subject };
+          const term: Term = { type: 'constant', name: subject };
           
-          // For statements like "whales are mammals", create both predicates with shared variable
-          if (!this.isVariable(subject)) {
-            // Create: Mammals(whales) - but also track that whales is the subject
-            const subjectVar = this.getVariable('entity', vars);
-            const equalityPredicate = FormulaBuilder.atomic('equals', [
-              { type: 'constant', name: subject },
-              { type: 'variable', name: subjectVar }
-            ]);
-            const propertyPredicate = FormulaBuilder.atomic(property, [{ type: 'variable', name: subjectVar }]);
-            return FormulaBuilder.and(equalityPredicate, propertyPredicate, match[0]);
-          }
-          
+          // Simple predication: Property(subject)
           return FormulaBuilder.atomic(property, [term], match[0]);
         },
         description: "Simple predication: 'X is Y'"
@@ -142,16 +147,28 @@ export class NaturalLanguageParser {
         description: "Simple statement: 'X does Y'"
       }
     ];
+    
+    // Now add formal logical syntax patterns (highest priority)
+    this.initializeFormalLogicPatterns();
+    
+    // Then add multiplicative connectives (ESSENTIAL for relevance logic)
+    this.initializeMultiplicativePatterns();
   }
 
   parse(statement: string): ParsedStatement {
-    const normalizedStatement = statement.trim().toLowerCase();
+    const trimmedStatement = statement.trim();
     const variables = new Map<string, string>();
     const assumptions: LogicFormula[] = [];
     const ambiguities: string[] = [];
 
     for (const pattern of this.patterns) {
-      const match = normalizedStatement.match(pattern.pattern);
+      // Try original case first (for formal logic patterns)
+      let match = trimmedStatement.match(pattern.pattern);
+      
+      // If no match, try lowercase (for natural language patterns)  
+      if (!match) {
+        match = trimmedStatement.toLowerCase().match(pattern.pattern);
+      }
       if (match) {
         try {
           const formula = pattern.builder(match, variables);
@@ -181,33 +198,95 @@ export class NaturalLanguageParser {
   }
 
   parseArgument(argumentText: string): { premises: ParsedStatement[], conclusion: ParsedStatement } {
-    const lines = argumentText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    // First, try to parse structured format (Premise 1:, Premise 2:, Conclusion:)
+    if (this.isStructuredFormat(argumentText)) {
+      return this.parseStructuredArgument(argumentText);
+    }
     
-    let conclusionIndex = -1;
+    // Otherwise, try natural language format with periods and newlines
+    let sentences = argumentText.split(/[.\n]|(?:\n\s*\n)/).map(s => s.trim()).filter(s => s.length > 0);
+    
+    // Find the sentence with conclusion markers
     const conclusionMarkers = ['therefore', 'thus', 'hence', 'so', 'it follows that', '∴'];
+    let conclusionIndex = -1;
     
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].toLowerCase();
-      if (conclusionMarkers.some(marker => line.includes(marker))) {
+    for (let i = 0; i < sentences.length; i++) {
+      const sentence = sentences[i].toLowerCase();
+      if (conclusionMarkers.some(marker => sentence.includes(marker))) {
         conclusionIndex = i;
         break;
       }
     }
-
-    if (conclusionIndex === -1) {
-      conclusionIndex = lines.length - 1;
-    }
-
-    const premises = lines.slice(0, conclusionIndex).map(line => this.parse(line));
-    let conclusionText = lines[conclusionIndex];
     
+    if (conclusionIndex === -1) {
+      // No conclusion marker - last sentence is conclusion
+      conclusionIndex = sentences.length - 1;
+    }
+    
+    const premises = sentences.slice(0, conclusionIndex).map(s => this.parse(s));
+    let conclusionText = sentences[conclusionIndex];
+    
+    // Remove conclusion markers
     conclusionMarkers.forEach(marker => {
-      const regex = new RegExp(`${marker}\\s*,?\\s*`, 'i');
+      const regex = new RegExp(`\\b${marker}\\s*,?\\s*`, 'i');
       conclusionText = conclusionText.replace(regex, '');
     });
+    
+    const conclusion = this.parse(conclusionText.trim());
+    
+    return { premises, conclusion };
+  }
 
-    const conclusion = this.parse(conclusionText);
+  private isStructuredFormat(argumentText: string): boolean {
+    const structuredPatterns = [
+      /premise\s*\d+\s*:/i,
+      /conclusion\s*:/i,
+      /^p\d+\s*:/i,
+      /^c\s*:/i
+    ];
+    
+    return structuredPatterns.some(pattern => pattern.test(argumentText));
+  }
 
+  private parseStructuredArgument(argumentText: string): { premises: ParsedStatement[], conclusion: ParsedStatement } {
+    const lines = argumentText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    const premises: ParsedStatement[] = [];
+    let conclusionText = '';
+    let foundExplicitConclusion = false;
+    
+    for (const line of lines) {
+      // Check for premise labels (more flexible pattern matching)
+      if (/^(premise\s*\d*|p\d*)\s*:/i.test(line)) {
+        const content = line.replace(/^(premise\s*\d*|p\d*)\s*:\s*/i, '').trim();
+        if (content.length > 0) {
+          premises.push(this.parse(content));
+        }
+      }
+      // Check for conclusion labels
+      else if (/^(conclusion|c)\s*:/i.test(line)) {
+        conclusionText = line.replace(/^(conclusion|c)\s*:\s*/i, '').trim();
+        foundExplicitConclusion = true;
+      }
+      // If we already have a conclusion and this is an unlabeled line, append to conclusion
+      else if (foundExplicitConclusion && conclusionText && line.length > 0) {
+        conclusionText += ' ' + line;
+      }
+      // If no labels yet and we haven't found explicit conclusion, treat as premise
+      else if (line.length > 0 && !foundExplicitConclusion) {
+        premises.push(this.parse(line));
+      }
+    }
+    
+    // If we found explicit conclusion markers but no conclusion text, 
+    // or if we have no explicit conclusion, use last premise as conclusion
+    if ((!conclusionText && foundExplicitConclusion) || (!foundExplicitConclusion && premises.length > 0)) {
+      const lastPremise = premises.pop();
+      conclusionText = lastPremise?.originalText || '';
+    }
+    
+    // Ensure we have a conclusion
+    const conclusion = conclusionText ? this.parse(conclusionText) : this.parse('no conclusion found');
+    
     return { premises, conclusion };
   }
 
@@ -280,6 +359,170 @@ export class NaturalLanguageParser {
   private createFallbackFormula(statement: string): LogicFormula {
     const normalizedPredicate = this.normalizeProperty(statement);
     return FormulaBuilder.atomic(normalizedPredicate, [], statement);
+  }
+
+  private initializeMultiplicativePatterns(): void {
+    // Multiplicative conjunction: A times B → A ⊗ B
+    this.patterns.push({
+      pattern: /^(.+) times (.+)$/i,
+      builder: (match, vars) => {
+        const left = this.parseSimpleStatement(match[1], vars);
+        const right = this.parseSimpleStatement(match[2], vars);
+        return FormulaBuilder.times(left, right, match[0]);
+      },
+      description: "Multiplicative conjunction: 'A times B' → A ⊗ B"
+    });
+
+    // Multiplicative implication: A lollipop B → A ⊸ B
+    this.patterns.push({
+      pattern: /^(.+) lollipop (.+)$/i,
+      builder: (match, vars) => {
+        const antecedent = this.parseSimpleStatement(match[1], vars);
+        const consequent = this.parseSimpleStatement(match[2], vars);
+        return FormulaBuilder.lollipop(antecedent, consequent, match[0]);
+      },
+      description: "Multiplicative implication: 'A lollipop B' → A ⊸ B"
+    });
+
+    // Multiplicative disjunction: A par B → A ⅋ B
+    this.patterns.push({
+      pattern: /^(.+) par (.+)$/i,
+      builder: (match, vars) => {
+        const left = this.parseSimpleStatement(match[1], vars);
+        const right = this.parseSimpleStatement(match[2], vars);
+        return FormulaBuilder.par(left, right, match[0]);
+      },
+      description: "Multiplicative disjunction: 'A par B' → A ⅋ B"
+    });
+
+    // Alternative syntax for multiplicative conjunction
+    this.patterns.push({
+      pattern: /^(.+) tensor (.+)$/i,
+      builder: (match, vars) => {
+        const left = this.parseSimpleStatement(match[1], vars);
+        const right = this.parseSimpleStatement(match[2], vars);
+        return FormulaBuilder.times(left, right, match[0]);
+      },
+      description: "Multiplicative conjunction: 'A tensor B' → A ⊗ B"
+    });
+
+    // Linear implication alternative
+    this.patterns.push({
+      pattern: /^(.+) linearly implies (.+)$/i,
+      builder: (match, vars) => {
+        const antecedent = this.parseSimpleStatement(match[1], vars);
+        const consequent = this.parseSimpleStatement(match[2], vars);
+        return FormulaBuilder.lollipop(antecedent, consequent, match[0]);
+      },
+      description: "Multiplicative implication: 'A linearly implies B' → A ⊸ B"
+    });
+
+    // Units
+    this.patterns.push({
+      pattern: /^multiplicative unit$/i,
+      builder: (match, vars) => {
+        return FormulaBuilder.one(match[0]);
+      },
+      description: "Multiplicative unit: 'multiplicative unit' → I"
+    });
+
+    this.patterns.push({
+      pattern: /^multiplicative falsity$/i,
+      builder: (match, vars) => {
+        return FormulaBuilder.bottom(match[0]);
+      },
+      description: "Multiplicative falsity: 'multiplicative falsity' → ⊥"
+    });
+  }
+
+  private initializeFormalLogicPatterns(): void {
+    // Formal logical conjunction: P(x) ∧ Q(y) 
+    this.patterns.push({
+      pattern: /^(.+)\s*∧\s*(.+)$/,
+      builder: (match, vars) => {
+        const left = this.parseLogicalExpression(match[1].trim(), vars);
+        const right = this.parseLogicalExpression(match[2].trim(), vars);
+        return FormulaBuilder.and(left, right, match[0]);
+      },
+      description: "Formal logical conjunction: P(x) ∧ Q(y)"
+    });
+
+    // Formal logical disjunction: P(x) ∨ Q(y)
+    this.patterns.push({
+      pattern: /^(.+)\s*∨\s*(.+)$/,
+      builder: (match, vars) => {
+        const left = this.parseLogicalExpression(match[1].trim(), vars);
+        const right = this.parseLogicalExpression(match[2].trim(), vars);
+        return FormulaBuilder.or(left, right, match[0]);
+      },
+      description: "Formal logical disjunction: P(x) ∨ Q(y)"
+    });
+
+    // Formal implication: P(x) → Q(y)
+    this.patterns.push({
+      pattern: /^(.+)\s*→\s*(.+)$/,
+      builder: (match, vars) => {
+        const antecedent = this.parseLogicalExpression(match[1].trim(), vars);
+        const consequent = this.parseLogicalExpression(match[2].trim(), vars);
+        return FormulaBuilder.relevantImplies(antecedent, consequent, match[0]);
+      },
+      description: "Formal implication: P(x) → Q(y)"
+    });
+
+    // Formal predicate: Predicate(term1, term2, ...)
+    this.patterns.push({
+      pattern: /^(\w+)\s*\(\s*([^)]+)\s*\)$/,
+      builder: (match, vars) => {
+        const predicate = match[1];
+        const termString = match[2];
+        const terms = termString.split(',').map(t => {
+          const trimmed = t.trim();
+          // Check if it's a variable (lowercase) or constant
+          return {
+            type: /^[a-z]$/.test(trimmed) ? 'variable' as const : 'constant' as const,
+            name: trimmed
+          };
+        });
+        return FormulaBuilder.atomic(predicate, terms, match[0]);
+      },
+      description: "Formal predicate: Predicate(term1, term2, ...)"
+    });
+  }
+
+  private parseLogicalExpression(expression: string, vars: Map<string, string>): LogicFormula {
+    const trimmed = expression.trim();
+    
+    // Try to parse as predicate first: Predicate(term1, term2, ...)
+    const predicateMatch = trimmed.match(/^(\w+)\s*\(\s*([^)]+)\s*\)$/);
+    if (predicateMatch) {
+      const predicate = predicateMatch[1];
+      const termString = predicateMatch[2];
+      const terms = termString.split(',').map(t => {
+        const trimmedTerm = t.trim();
+        return {
+          type: /^[a-z]$/.test(trimmedTerm) ? 'variable' as const : 'constant' as const,
+          name: trimmedTerm
+        };
+      });
+      return FormulaBuilder.atomic(predicate, terms, trimmed);
+    }
+    
+    // Try to parse as simple atomic predicate without parentheses
+    const simpleAtomicMatch = trimmed.match(/^[A-Z]\w*$/);
+    if (simpleAtomicMatch) {
+      return FormulaBuilder.atomic(trimmed, [], trimmed);
+    }
+    
+    // If it contains formal logical operators, don't fall back to normalizeProperty
+    // which would strip them out - instead create a basic atomic formula
+    if (/[∧∨→⊸⊗⅋¬∀∃]/.test(trimmed)) {
+      // This should have been caught by the formal logic patterns, 
+      // but if we reach here, create a basic atomic formula
+      return FormulaBuilder.atomic(trimmed.replace(/\s+/g, '_'), [], trimmed);
+    }
+    
+    // Fallback to regular parsing for natural language
+    return this.parseSimpleStatement(trimmed, vars);
   }
 
   getSupportedPatterns(): string[] {

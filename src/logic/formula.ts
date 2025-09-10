@@ -41,8 +41,12 @@ export class FormulaBuilder {
     const predicates = new Set<string>();
 
     subformulas.forEach(sub => {
-      sub.variables.forEach(v => variables.add(v));
-      sub.predicates.forEach(p => predicates.add(p));
+      if (sub.variables) {
+        sub.variables.forEach(v => variables.add(v));
+      }
+      if (sub.predicates) {
+        sub.predicates.forEach(p => predicates.add(p));
+      }
     });
 
     return {
@@ -73,7 +77,43 @@ export class FormulaBuilder {
   }
 
   static relevantImplies(antecedent: LogicFormula, consequent: LogicFormula, naturalLanguage?: string): LogicFormula {
-    return this.compound('relevant_implies', [antecedent, consequent], naturalLanguage);
+    return this.compound('implies', [antecedent, consequent], naturalLanguage);
+  }
+
+  // Multiplicative connectives (ESSENTIAL for relevance logic)
+  static times(left: LogicFormula, right: LogicFormula, naturalLanguage?: string): LogicFormula {
+    return this.compound('times', [left, right], naturalLanguage);
+  }
+
+  static lollipop(antecedent: LogicFormula, consequent: LogicFormula, naturalLanguage?: string): LogicFormula {
+    return this.compound('lollipop', [antecedent, consequent], naturalLanguage);
+  }
+
+  static par(left: LogicFormula, right: LogicFormula, naturalLanguage?: string): LogicFormula {
+    return this.compound('par', [left, right], naturalLanguage);
+  }
+
+  // Units
+  static one(naturalLanguage?: string): LogicFormula {
+    return {
+      id: this.generateId(),
+      type: 'atomic',
+      predicate: 'I',
+      variables: new Set(),
+      predicates: new Set(['I']),
+      naturalLanguage: naturalLanguage || 'multiplicative unit (I)'
+    };
+  }
+
+  static bottom(naturalLanguage?: string): LogicFormula {
+    return {
+      id: this.generateId(),
+      type: 'atomic', 
+      predicate: '⊥',
+      variables: new Set(),
+      predicates: new Set(['⊥']),
+      naturalLanguage: naturalLanguage || 'multiplicative falsity (⊥)'
+    };
   }
 
   static forall(variable: string, formula: LogicFormula, naturalLanguage?: string): LogicFormula {
@@ -90,20 +130,86 @@ export class FormulaBuilder {
 }
 
 export class FormulaUtils {
+  // DEPRECATED: Use hasExactAtomicSharing instead
   static hasSharedVariables(formula1: LogicFormula, formula2: LogicFormula): boolean {
-    for (const variable of formula1.variables) {
-      if (formula2.variables.has(variable)) {
-        return true;
-      }
-    }
-    return false;
+    return this.hasExactAtomicSharing(formula1, formula2);
   }
 
+  // DEPRECATED: Use getSharedAtomicFormulas instead  
   static getSharedVariables(formula1: LogicFormula, formula2: LogicFormula): Set<string> {
     const shared = new Set<string>();
     for (const variable of formula1.variables) {
       if (formula2.variables.has(variable)) {
         shared.add(variable);
+      }
+    }
+    return shared;
+  }
+
+  /**
+   * EXACT SYNTACTIC SHARING: Check if two formulas share identical atomic formulas
+   * This is the CORRECT relevance logic requirement, not just variable name similarity
+   */
+  static hasExactAtomicSharing(formula1: LogicFormula, formula2: LogicFormula): boolean {
+    const atoms1 = this.extractAtomicFormulas(formula1);
+    const atoms2 = this.extractAtomicFormulas(formula2);
+    
+    for (const atom1 of atoms1) {
+      for (const atom2 of atoms2) {
+        if (this.atomicFormulasIdentical(atom1, atom2)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Extract all atomic formulas from a complex formula
+   */
+  static extractAtomicFormulas(formula: LogicFormula): LogicFormula[] {
+    if (formula.type === 'atomic') {
+      return [formula];
+    }
+    
+    const atoms: LogicFormula[] = [];
+    if (formula.subformulas) {
+      for (const sub of formula.subformulas) {
+        atoms.push(...this.extractAtomicFormulas(sub));
+      }
+    }
+    return atoms;
+  }
+
+  /**
+   * Check if two atomic formulas have syntactic sharing in relevance logic
+   * In relevance logic, predicate sharing with same arity constitutes valid sharing
+   */
+  static atomicFormulasIdentical(atom1: LogicFormula, atom2: LogicFormula): boolean {
+    if (atom1.type !== 'atomic' || atom2.type !== 'atomic') return false;
+    if (atom1.predicate !== atom2.predicate) return false;
+    
+    // Check arity matches - same predicate with same number of arguments
+    const arity1 = atom1.terms?.length || 0;
+    const arity2 = atom2.terms?.length || 0;
+    
+    return arity1 === arity2;
+  }
+
+  /**
+   * Get all atomic formulas that are shared between two complex formulas
+   */
+  static getSharedAtomicFormulas(formula1: LogicFormula, formula2: LogicFormula): LogicFormula[] {
+    const atoms1 = this.extractAtomicFormulas(formula1);
+    const atoms2 = this.extractAtomicFormulas(formula2);
+    const shared: LogicFormula[] = [];
+    
+    for (const atom1 of atoms1) {
+      for (const atom2 of atoms2) {
+        if (this.atomicFormulasIdentical(atom1, atom2)) {
+          shared.push(atom1);
+          break; // Don't add duplicates
+        }
       }
     }
     return shared;
@@ -132,10 +238,15 @@ export class FormulaUtils {
             return `(${this.toString(first)} ∨ ${this.toString(second)})`;
           case 'implies':
             return `(${this.toString(first)} → ${this.toString(second)})`;
-          case 'relevant_implies':
-            return `(${this.toString(first)} →ᵣ ${this.toString(second)})`;
           case 'biconditional':
             return `(${this.toString(first)} ↔ ${this.toString(second)})`;
+          // Multiplicative connectives
+          case 'times':
+            return `(${this.toString(first)} ⊗ ${this.toString(second)})`;
+          case 'lollipop':
+            return `(${this.toString(first)} ⊸ ${this.toString(second)})`;
+          case 'par':
+            return `(${this.toString(first)} ⅋ ${this.toString(second)})`;
           case 'forall':
             const forallVar = Array.from(first.variables)[0] || 'x';
             return `∀${forallVar}(${this.toString(first)})`;

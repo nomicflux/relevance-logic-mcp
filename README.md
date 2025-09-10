@@ -1,15 +1,61 @@
 # Relevance Logic MCP Server
 
-A Model Context Protocol (MCP) server for relevance logic operations that helps AI assistants reason more rigorously by enforcing logical relevance between premises and conclusions.
+A Model Context Protocol (MCP) server that helps AI assistants construct logically rigorous explanations and arguments using strict relevance logic principles. Designed to work transparently in the background to enhance AI reasoning quality.
 
-## Features
+## Overview
 
-- **Parse natural language** into formal logical expressions
-- **Validate arguments** using relevance logic principles
-- **Check relevance** between premises and conclusions
-- **Prevent spurious inferences** based on word similarity alone
-- **Explain logical structures** in natural language
-- **Analyze reasoning chains** for logical validity
+This MCP server enables AI assistants to automatically structure their reasoning through relevance logic - a formal system that requires exact syntactic sharing between premises and conclusions, preventing spurious inferences and logical gaps.
+
+## Key Features
+
+- **Automatic Reasoning Enhancement**: Transparently improves AI explanations and arguments
+- **Strict Relevance Logic**: Implements formal relevance logic systems (B, T, E, R) with exact syntactic sharing
+- **Gap Analysis**: Automatically identifies and suggests fixes for logical gaps
+- **Formal Logic Support**: Handles both natural language and formal logical notation (∧, →, ∨, etc.)
+- **Multiplicative Connectives**: Supports advanced relevance logic operators (⊗, ⊸, ⅋)
+
+## Usage with Claude Desktop
+
+### Simple Usage (Recommended)
+Tell Claude Desktop: **"Use RLMCP to explain [your question]"**
+
+Claude will automatically:
+1. Structure your reasoning into formal logical premises
+2. Validate the logical connections  
+3. Identify any gaps in reasoning
+4. Provide recommendations for strengthening arguments
+5. Present a logically rigorous response
+
+### Example
+```
+User: "Use RLMCP to explain why TypeScript is better than JavaScript for large projects"
+
+Claude Desktop will automatically use the relevance logic server to:
+- Formalize the comparison arguments
+- Ensure proper logical connections between claims and evidence  
+- Validate the reasoning chain
+- Present a structured, logically sound explanation
+```
+
+## How It Works
+
+The server implements **strict relevance logic** which:
+
+1. **Requires Exact Syntactic Sharing**: Premises and conclusions must share identical atomic formulas
+2. **Prevents Classical Paradoxes**: Blocks inferences like "false implies anything"
+3. **Enforces Logical Rigor**: Every step must have explicit logical justification
+4. **Maintains Topic Coherence**: Prevents reasoning from drifting between unrelated topics
+
+### What Gets Blocked vs Allowed
+
+❌ **Blocked**: "The moon is cheese → Either it's raining or not raining"
+- No syntactic sharing between premise and conclusion
+
+❌ **Blocked**: "All birds fly → Sparrows fly" 
+- Missing connecting premise: "Sparrows are birds"
+
+✅ **Allowed**: "All birds fly ∧ Sparrows are birds → Sparrows fly"
+- Exact syntactic sharing through "birds" predicate
 
 ## Setup
 
@@ -23,103 +69,83 @@ A Model Context Protocol (MCP) server for relevance logic operations that helps 
    npm run build
    ```
 
-3. Test the server:
+3. Start the server:
    ```bash
-   node simple-test.js
+   npm start
    ```
 
-## Claude Desktop Integration
+## Claude Desktop Configuration
 
-To use this server with Claude Desktop:
+Add to your Claude Desktop MCP configuration:
 
-1. Copy the configuration from `claude_desktop_config.json`
-2. Add it to your Claude Desktop MCP configuration
-3. Restart Claude Desktop
-4. The server will appear as "relevance-logic" with the following tools:
+```json
+{
+  "mcpServers": {
+    "relevance-logic-mcp": {
+      "command": "node",
+      "args": ["/path/to/relevance-logic-mcp/build/index.js"],
+      "cwd": "/path/to/relevance-logic-mcp"
+    }
+  }
+}
+```
 
 ## Available Tools
 
-### `parse_statement`
-Converts natural language statements into formal logic notation.
+### Primary Tool: `rlmcp_reason`
+The main tool that handles all relevance logic processing transparently. Takes any reasoning task and automatically:
+- Formalizes natural language into logical structure
+- Validates relevance logic principles
+- Identifies logical gaps
+- Provides strengthening recommendations
 
-**Example:**
-```
-Statement: "All birds can fly"
-Result: ∀x (Bird(x) →ᵣ CanFly(x))
-```
+### Advanced Tools (for explicit use)
+- `validate_argument`: Ensure explanations involving multiple premises avoid logical gaps and fallacies
+- `structure_argument`: Transform complex explanations into clear logical structure  
+- `formalize_reasoning`: Strengthen reasoning by making implicit logical connections explicit
+- `diagnose_gaps`: Identify and fill logical gaps in complex explanations
+- `parse_statement`: Parse natural language into formal relevance logic
+- `check_relevance`: Check exact syntactic sharing between premises and conclusion
 
-### `validate_argument` 
-Validates logical arguments using relevance logic principles. **Requires all necessary premises to be explicitly stated.**
+## Relevance Logic Systems
 
-**Valid Example:**
-```
-Argument: "All mammals need oxygen. Whales are mammals. Therefore, whales need oxygen."
-Result: Valid with high relevance score
-```
+The server supports multiple relevance logic systems:
 
-**Invalid Example (Missing Premise):**
-```
-Argument: "All birds fly. Therefore, sparrows fly."
-Result: Invalid - missing premise "Sparrows are birds"
-Error: "Conclusion does not share sufficient variables with premises"
-```
-
-### `check_relevance`
-Analyzes whether premises are logically relevant to a conclusion.
-
-**Example:**
-```
-Premises: ["Dogs are loyal", "Loyal animals make good pets"]
-Conclusion: "Dogs make good pets"
-Result: High relevance (shared variables: loyal, animals)
-```
-
-### `explain_formula`
-Breaks down logical formulas into natural language explanations.
-
-### `analyze_reasoning_chain`
-Validates multi-step reasoning processes for logical consistency.
-
-## How It Works
-
-This server implements **relevance logic**, a non-classical logic system that:
-
-1. **Enforces variable sharing**: Premises and conclusions must share meaningful logical variables
-2. **Prevents classical paradoxes**: Rejects inferences like "false implies anything"  
-3. **Blocks topic drift**: Stops reasoning from jumping between unrelated domains
-4. **Maintains logical rigor**: Uses formal proof methods while requiring relevance
-
-## Example Usage
-
-The server helps prevent common logical fallacies:
-
-❌ **Blocked**: "The moon is cheese → Either it's raining or not raining"
-- No shared variables between premise and conclusion
-
-❌ **Blocked**: "All birds fly → Sparrows fly" 
-- Missing premise: "Sparrows are birds" 
-- No shared variables between "birds" and "sparrows" without connecting premise
-
-✅ **Allowed**: "All birds fly + Sparrows are birds → Sparrows fly"
-- Complete argument with proper variable sharing through all premises
+- **System B**: Basic relevance (identity only)
+- **System T**: Adds contraction rule
+- **System E**: Entailment logic  
+- **System R**: Full relevance logic (default)
 
 ## Benefits for AI Reasoning
 
-- **Prevents hallucination** by requiring explicit logical connections
-- **Reduces bias** by separating logical necessity from statistical correlation
-- **Improves transparency** by making reasoning steps explicit  
-- **Enhances reliability** by catching spurious inferences
-- **Maintains rigor** while allowing contextually appropriate reasoning
+- **Prevents Hallucination**: Requires explicit logical connections
+- **Reduces Spurious Correlations**: Separates logical necessity from statistical patterns
+- **Improves Transparency**: Makes reasoning steps explicit
+- **Enhances Reliability**: Catches logical fallacies and gaps
+- **Maintains Rigor**: Ensures conclusions actually follow from premises
 
 ## Testing
 
-Run the comprehensive test suite:
+The parser has been comprehensively tested and supports:
+- Formal logical syntax parsing (∧, →, ∨, ⊗, ⊸, ⅋)
+- Structured argument processing ("Premise 1:", "Conclusion:" format)  
+- Natural language to formal logic conversion
+- Relevance logic validation with exact syntactic sharing
+- Automatic gap analysis and repair recommendations
+
+Test the parser functionality:
 ```bash
-node demo-test.js
+node test-parser.js
 ```
 
-This demonstrates the server's ability to:
-- Identify relevant vs irrelevant logical connections
-- Parse complex natural language statements
-- Explain logical structures clearly
-- Prevent classical logical paradoxes
+## Development
+
+For development and debugging:
+```bash
+npm run dev    # Watch mode compilation
+npm run build  # Production build
+```
+
+## Version
+
+**2.0.0** - Strict relevance logic compliance with transparent AI integration
