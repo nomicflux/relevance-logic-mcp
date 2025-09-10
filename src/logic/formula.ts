@@ -130,21 +130,6 @@ export class FormulaBuilder {
 }
 
 export class FormulaUtils {
-  // DEPRECATED: Use hasExactAtomicSharing instead
-  static hasSharedVariables(formula1: LogicFormula, formula2: LogicFormula): boolean {
-    return this.hasExactAtomicSharing(formula1, formula2);
-  }
-
-  // DEPRECATED: Use getSharedAtomicFormulas instead  
-  static getSharedVariables(formula1: LogicFormula, formula2: LogicFormula): Set<string> {
-    const shared = new Set<string>();
-    for (const variable of formula1.variables) {
-      if (formula2.variables.has(variable)) {
-        shared.add(variable);
-      }
-    }
-    return shared;
-  }
 
   /**
    * EXACT SYNTACTIC SHARING: Check if two formulas share identical atomic formulas
