@@ -436,6 +436,28 @@ export class NaturalLanguageParser {
   }
 
   private initializeFormalLogicPatterns(): void {
+    // Formal universal quantification: ∀x(P(x)) - MUST BE FIRST for precedence
+    this.patterns.push({
+      pattern: /^∀(\w+)\s*\(\s*(.+)\s*\)$/,
+      builder: (match, vars) => {
+        const variable = match[1];
+        const scope = this.parseLogicalExpression(match[2].trim(), vars);
+        return FormulaBuilder.forall(variable, scope, match[0]);
+      },
+      description: "Formal universal quantification: ∀x(P(x))"
+    });
+
+    // Formal existential quantification: ∃x(P(x)) - MUST BE SECOND for precedence
+    this.patterns.push({
+      pattern: /^∃(\w+)\s*\(\s*(.+)\s*\)$/,
+      builder: (match, vars) => {
+        const variable = match[1];
+        const scope = this.parseLogicalExpression(match[2].trim(), vars);
+        return FormulaBuilder.exists(variable, scope, match[0]);
+      },
+      description: "Formal existential quantification: ∃x(P(x))"
+    });
+
     // Formal logical conjunction: P(x) ∧ Q(y) 
     this.patterns.push({
       pattern: /^(.+)\s*∧\s*(.+)$/,
@@ -492,7 +514,31 @@ export class NaturalLanguageParser {
   private parseLogicalExpression(expression: string, vars: Map<string, string>): LogicFormula {
     const trimmed = expression.trim();
     
-    // Try to parse as predicate first: Predicate(term1, term2, ...)
+    // Try formal logical operators first - implication
+    const implicationMatch = trimmed.match(/^(.+)\s*→\s*(.+)$/);
+    if (implicationMatch) {
+      const antecedent = this.parseLogicalExpression(implicationMatch[1].trim(), vars);
+      const consequent = this.parseLogicalExpression(implicationMatch[2].trim(), vars);
+      return FormulaBuilder.relevantImplies(antecedent, consequent, trimmed);
+    }
+    
+    // Try formal logical operators - conjunction
+    const conjunctionMatch = trimmed.match(/^(.+)\s*∧\s*(.+)$/);
+    if (conjunctionMatch) {
+      const left = this.parseLogicalExpression(conjunctionMatch[1].trim(), vars);
+      const right = this.parseLogicalExpression(conjunctionMatch[2].trim(), vars);
+      return FormulaBuilder.and(left, right, trimmed);
+    }
+    
+    // Try formal logical operators - disjunction
+    const disjunctionMatch = trimmed.match(/^(.+)\s*∨\s*(.+)$/);
+    if (disjunctionMatch) {
+      const left = this.parseLogicalExpression(disjunctionMatch[1].trim(), vars);
+      const right = this.parseLogicalExpression(disjunctionMatch[2].trim(), vars);
+      return FormulaBuilder.or(left, right, trimmed);
+    }
+    
+    // Try to parse as predicate: Predicate(term1, term2, ...)
     const predicateMatch = trimmed.match(/^(\w+)\s*\(\s*([^)]+)\s*\)$/);
     if (predicateMatch) {
       const predicate = predicateMatch[1];
@@ -511,14 +557,6 @@ export class NaturalLanguageParser {
     const simpleAtomicMatch = trimmed.match(/^[A-Z]\w*$/);
     if (simpleAtomicMatch) {
       return FormulaBuilder.atomic(trimmed, [], trimmed);
-    }
-    
-    // If it contains formal logical operators, don't fall back to normalizeProperty
-    // which would strip them out - instead create a basic atomic formula
-    if (/[∧∨→⊸⊗⅋¬∀∃]/.test(trimmed)) {
-      // This should have been caught by the formal logic patterns, 
-      // but if we reach here, create a basic atomic formula
-      return FormulaBuilder.atomic(trimmed.replace(/\s+/g, '_'), [], trimmed);
     }
     
     // Fallback to regular parsing for natural language

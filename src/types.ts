@@ -84,3 +84,18 @@ export interface SystemRValidation {
   violatedConstraints: string[];
   relevanceMap: Map<string, RelevanceContext>;
 }
+
+// Step 4: Quantifier Scope Handling - REQUIRED for System R variable binding
+export interface QuantifierScope {
+  quantifier: 'forall' | 'exists';
+  boundVariable: string;
+  scope: LogicFormula;
+  bindings: Map<string, Term>;
+}
+
+// Step 5: Distribution Axioms - REQUIRED for System R distribution laws
+export interface DistributionRule {
+  pattern: LogicFormula;
+  distributed: LogicFormula;
+  conditions: string[];
+}
