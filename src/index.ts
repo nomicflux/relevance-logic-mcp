@@ -13,10 +13,12 @@ import {
 import { NaturalLanguageParser } from "./parser/nlp-parser.js";
 import { FormulaUtils } from "./logic/formula.js";
 import { LogicFormula, SystemRValidation } from "./types.js";
+import { EvidenceModule } from "./evidence/evidence-module.js";
 
 class RelevanceLogicServer {
   private server: Server;
   private parser: NaturalLanguageParser;
+  private evidenceModule: EvidenceModule;
 
   constructor() {
     this.server = new Server(
@@ -33,6 +35,7 @@ class RelevanceLogicServer {
     );
 
     this.parser = new NaturalLanguageParser();
+    this.evidenceModule = new EvidenceModule();
     
     this.setupToolHandlers();
     this.setupPromptHandlers();
@@ -159,6 +162,25 @@ class RelevanceLogicServer {
                 },
               },
               required: ["naturalStatement"],
+            },
+          },
+          {
+            name: "evidence_gathering",
+            description: "Optional add-on tool for rlmcp_reason. Takes the structured logical output from rlmcp_reason and requires evidence for each atom and implication. Validates both logical structure AND evidence completeness.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                rlmcp_output: {
+                  type: "string",
+                  description: "JSON output from rlmcp_reason containing structured logical analysis"
+                },
+                context: {
+                  type: "string",
+                  description: "Additional context for evidence gathering",
+                  default: ""
+                }
+              },
+              required: ["rlmcp_output"],
             },
           },
         ] satisfies Tool[],
@@ -328,6 +350,84 @@ class RelevanceLogicServer {
               },
             ],
           };
+        }
+        
+        case "evidence_gathering": {
+          const { rlmcp_output, context } = args as { rlmcp_output: string; context?: string };
+          
+          try {
+            // Parse the rlmcp_reason output
+            const rlmcpAnalysis = JSON.parse(rlmcp_output);
+            
+            // Verify it's valid rlmcp_reason output
+            if (!rlmcpAnalysis.rlmcp_analysis) {
+              throw new Error("Input must be valid JSON output from rlmcp_reason tool");
+            }
+            
+            const analysis = rlmcpAnalysis.rlmcp_analysis;
+            
+            // Check logical validity first - evidence only applies to valid arguments
+            if (analysis.validation_results && !analysis.validation_results.overallValid) {
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    error: "LOGICAL_VALIDATION_FAILED",
+                    message: "Evidence cannot be gathered for logically invalid arguments. Fix logical structure first.",
+                    original_analysis: analysis,
+                    logical_issues: analysis.gap_analysis || analysis.validation_results
+                  }, null, 2)
+                }]
+              };
+            }
+            
+            // Extract structured argument from original task - need to re-parse to get full structure
+            const structured = this.parser.parseArgument(analysis.original_task);
+            
+            // Generate evidence requirements for all logical components
+            const complianceReport = this.evidenceModule.enforceEvidenceCompliance({
+              premises: structured.premises,
+              conclusion: structured.conclusion,
+              validation: { validation: analysis.validation_results }
+            });
+            
+            // Return combined validation: BOTH logic AND evidence must pass
+            const overallValid = analysis.validation_results.overallValid && complianceReport.isCompliant;
+            
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  original_rlmcp_analysis: analysis,
+                  evidence_analysis: {
+                    logical_validity: analysis.validation_results.overallValid ? "VALID" : "INVALID",
+                    evidence_completeness: complianceReport.isCompliant ? "COMPLETE" : "INCOMPLETE",
+                    overall_status: overallValid ? "VALID_WITH_EVIDENCE" : "REQUIRES_EVIDENCE",
+                    evidence_requirements: complianceReport.requirements.map(req => ({
+                      type: req.type,
+                      target: req.target,
+                      description: req.description,
+                      provided: req.provided,
+                      evidence: req.evidence || null
+                    })),
+                    evidence_summary: this.evidenceModule.generateComplianceSummary(complianceReport.requirements)
+                  }
+                }, null, 2)
+              }]
+            };
+            
+          } catch (error) {
+            return {
+              content: [{
+                type: "text", 
+                text: JSON.stringify({
+                  error: "INVALID_INPUT",
+                  message: "Failed to parse rlmcp_reason output. Ensure input is valid JSON from rlmcp_reason tool.",
+                  details: error instanceof Error ? error.message : String(error)
+                }, null, 2)
+              }]
+            };
+          }
         }
 
         default:
