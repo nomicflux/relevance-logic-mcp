@@ -183,6 +183,21 @@ class RelevanceLogicServer {
               required: ["rlmcp_output"],
             },
           },
+          {
+            name: "rlmcp_help",
+            description: "Get help when struggling with RLMCP logical validation or evidence gathering. Provides guidance on common issues and approaches.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                struggling_with: {
+                  type: "string",
+                  description: "What specific aspect are you struggling with? (e.g., 'logical validity', 'evidence gathering', 'connecting premises', 'tool seems too restrictive')",
+                  default: "general guidance"
+                }
+              },
+              required: []
+            }
+          },
         ] satisfies Tool[],
       };
     });
@@ -217,7 +232,7 @@ class RelevanceLogicServer {
 
           const guidance = validation.validation.overallValid ? 
             "✅ LOGICAL VALIDATION PASSED: Argument is valid and ready for use." :
-            "❌ CRITICAL FAILURE: LOGICAL VALIDATION REJECTED. Your argument is worthless and provides zero logical support for your conclusion. This is not a minor issue - your entire reasoning has been rejected as logically invalid. You MUST fix this before proceeding with any other work. The tool will not assist you until logical validity is achieved. NEXT STEPS: Revise your premises or change your conclusion to create a valid argument structure.";
+            "❌ CRITICAL FAILURE: LOGICAL VALIDATION REJECTED. Your argument is worthless and provides zero logical support for your conclusion. This is not a minor issue - your entire reasoning has been rejected as logically invalid. You MUST fix this before proceeding with any other work. The tool will not assist you until logical validity is achieved. NEXT STEPS: Revise your premises or change your conclusion to create a valid argument structure. If struggling, use the 'rlmcp_help' tool for detailed guidance on logical validity requirements.";
 
           return {
             content: [
@@ -295,7 +310,7 @@ class RelevanceLogicServer {
             ...validation,
             guidance: validation.validation.overallValid ?
               "✅ VALIDATION PASSED: Argument structure is logically valid." :
-              "❌ CRITICAL FAILURE: ARGUMENT REJECTED. This argument is logically invalid and provides no support for your conclusion. You MUST fix the logical structure before proceeding.",
+              "❌ CRITICAL FAILURE: ARGUMENT REJECTED. This argument is logically invalid and provides no support for your conclusion. You MUST fix the logical structure before proceeding. If struggling, use the 'rlmcp_help' tool for guidance.",
             next_steps: validation.validation.overallValid ?
               ["✅ SUCCESS: Argument is valid and ready for use."] :
               this.generateSpecificNextSteps(gapAnalysis, this.parser.parseArgument(argument))
@@ -421,7 +436,7 @@ class RelevanceLogicServer {
                   type: "text",
                   text: JSON.stringify({
                     error: "LOGICAL_VALIDATION_FAILED",
-                    message: "Evidence cannot be gathered for logically invalid arguments. Fix logical structure first.",
+                    message: "Evidence cannot be gathered for logically invalid arguments. Fix logical structure first using 'rlmcp_reason' tool, then return with valid output. If struggling with logical validity, use the 'rlmcp_help' tool.",
                     original_analysis: analysis,
                     logical_issues: analysis.gap_analysis || analysis.validation_results
                   }, null, 2)
@@ -456,7 +471,7 @@ class RelevanceLogicServer {
                     progress: `Evidence provided for ${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} requirements`,
                     guidance: overallValid ? 
                       "✅ COMPLETE SUCCESS: Argument is logically valid with complete evidence support. Task completed successfully." :
-                      "❌ CRITICAL FAILURE: TASK REJECTED. Full success requires BOTH logical validity AND complete evidence for every atom and implication. Your current work is INCOMPLETE and does not meet requirements. You MUST continue providing evidence for all logical components, or revise premises/conclusion to create a stronger argument. DO NOT CLAIM SUCCESS UNTIL BOTH CONDITIONS ARE MET.",
+                      "❌ CRITICAL FAILURE: TASK REJECTED. Full success requires BOTH logical validity AND complete evidence for every atom and implication. Your current work is INCOMPLETE and does not meet requirements. You MUST continue providing evidence for all logical components, or revise premises/conclusion to create a stronger argument. DO NOT CLAIM SUCCESS UNTIL BOTH CONDITIONS ARE MET. If struggling, use the 'rlmcp_help' tool for guidance on evidence requirements.",
                     evidence_requirements: complianceReport.requirements.map(req => ({
                       type: req.type,
                       target: req.target,
@@ -482,6 +497,89 @@ class RelevanceLogicServer {
               }]
             };
           }
+        }
+
+        case "rlmcp_help": {
+          const { struggling_with } = args as { struggling_with?: string };
+          
+          const helpContent = {
+            message: "🆘 RLMCP Help - Don't Give Up! This tool can work with proper approach.",
+            
+            mindset_shift: {
+              title: "❌ WRONG THINKING vs ✅ RIGHT THINKING",
+              wrong: "This logical validity tool is too restrictive for real-world tasks",
+              right: "If I struggle to fit my argument to the tool, there's something in my argument I'm not making explicit. I need to be clearer about my intuitions, domain knowledge, and assumptions.",
+              key_point: "The tool exposes gaps in reasoning that need to be filled, not avoided."
+            },
+            
+            logical_building_blocks: {
+              title: "🧱 Basic Logical Building Blocks You Can Use:",
+              atomic_facts: {
+                description: "Simple statements about the world",
+                examples: ["mammal(dolphin)", "warm_blooded(x)", "large_project(x)", "maintainable(typescript_code)"]
+              },
+              conjunctions: {
+                description: "AND statements - both things are true",
+                examples: ["P(x) ∧ Q(x) - 'x has both property P and property Q'"],
+                usage: "Use when multiple conditions must be met"
+              },
+              disjunctions: {
+                description: "OR statements - at least one thing is true", 
+                examples: ["P(x) ∨ Q(x) - 'x has either property P or property Q (or both)'"],
+                usage: "Use when multiple paths lead to the same conclusion"
+              },
+              implications: {
+                description: "IF-THEN statements - the most important connector",
+                examples: [
+                  "mammal(x) → warm_blooded(x) - 'if x is a mammal, then x is warm-blooded'",
+                  "large_project(x) → needs_structure(x) - 'if x is a large project, then x needs structure'",
+                  "needs_structure(x) → typescript_better(x) - 'if x needs structure, then typescript is better for x'"
+                ],
+                critical_usage: "Use implications to connect premises to each other AND to your conclusion. Chain them together to build logical paths."
+              }
+            },
+            
+            evidence_gathering_guidance: {
+              title: "📋 When Evidence is Required:",
+              atoms_need_evidence: "Every atomic statement needs evidence: mammal(dolphin) needs proof that dolphins are mammals",
+              implications_need_evidence: "⚠️ CRITICAL: Implications need evidence too! mammal(x) → warm_blooded(x) needs evidence that mammals are warm-blooded",
+              evidence_format: "Each piece of evidence needs: (summary, strength 0-1, citation)",
+              no_shortcuts: "There are no shortcuts - every logical component needs evidence when requested"
+            },
+            
+            success_mindset: {
+              title: "🎯 What Success Looks Like:",
+              user_expectation: "If the user asked for this tool, they want STRICT LOGICAL VALIDITY. They do not want a half-done job.",
+              your_job: "Continue until successful. Change premises and conclusions as needed to match what is actually supported by evidence and contains logically valid connections.",
+              when_stuck: "If you cannot fill a logical gap, return to the user for help with that SPECIFIC gap. Don't give up - ask for clarification on the specific missing piece.",
+              persistence: "The tool rewards persistence and precision, not shortcuts."
+            },
+            
+            common_fixes: {
+              title: "🔧 Common Solutions When Stuck:",
+              missing_connections: "Add implication premises that connect your existing premises to your conclusion",
+              too_big_a_leap: "Break down large logical jumps into smaller, more obvious steps",
+              domain_knowledge: "Make your domain expertise explicit as premises rather than assuming it",
+              evidence_gaps: "If evidence is missing, either find it or revise your claims to match available evidence",
+              wrong_conclusion: "Sometimes the logic leads to a different conclusion than you started with - follow the logic!"
+            },
+            
+            next_steps: [
+              "1. Identify the specific gap or error message you're getting",
+              "2. Use implications to bridge logical gaps between premises and conclusion", 
+              "3. Make implicit assumptions explicit as premises",
+              "4. If using evidence, provide evidence for EVERY atom and implication",
+              "5. Be willing to revise your conclusion to match what the logic actually supports",
+              "6. If truly stuck, ask the user for help with the specific missing piece"
+            ]
+          };
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(helpContent, null, 2)
+            }]
+          };
         }
 
         default:
@@ -1309,6 +1407,7 @@ Do this validation transparently, then present the improved reasoning.`
     }
     
     steps.push("THEN: Re-run rlmcp_reason with your revised argument");
+    steps.push("If struggling with these requirements, use the 'rlmcp_help' tool for detailed guidance");
     return steps;
   }
 
