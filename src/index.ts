@@ -212,6 +212,13 @@ class RelevanceLogicServer {
             gapAnalysis = this.diagnoseLogicalGaps(task);
           }
           
+          const logicalStatus = validation.validation.overallValid ? "VALID" : 
+            `INVALID - gaps remaining: ${gapAnalysis ? gapAnalysis.gapAnalysis.logicalBridges.missingBridges.map(b => b.description).join('; ') : "logical structure issues"}`;
+
+          const guidance = validation.validation.overallValid ? 
+            "✅ LOGICAL VALIDATION PASSED: Argument is valid and ready for use." :
+            "❌ CRITICAL FAILURE: LOGICAL VALIDATION REJECTED. Your argument is worthless and provides zero logical support for your conclusion. This is not a minor issue - your entire reasoning has been rejected as logically invalid. You MUST fix this before proceeding with any other work. The tool will not assist you until logical validity is achieved. NEXT STEPS: Revise your premises or change your conclusion to create a valid argument structure.";
+
           return {
             content: [
               {
@@ -223,12 +230,15 @@ class RelevanceLogicServer {
                     structured_argument: {
                       premises: structured.premises.length,
                       conclusion: structured.conclusion.originalText,
-                      logical_structure: validation.validation.overallValid ? "VALID" : "INVALID"
+                      logical_structure: logicalStatus
                     },
                     validation_results: validation.validation,
                     gap_analysis: gapAnalysis,
+                    guidance: guidance,
+                    next_steps: validation.validation.overallValid ? 
+                      ["✅ SUCCESS: Logical validation passed. If evidence is required, use the evidence_gathering tool with this output."] :
+                      this.generateSpecificNextSteps(gapAnalysis, structured),
                     recommendations: gapAnalysis?.recommendations || [
-                      "Argument is logically valid under relevance logic principles",
                       "All premises properly connect to conclusion through exact syntactic sharing"
                     ]
                   }
@@ -275,15 +285,27 @@ class RelevanceLogicServer {
           const validation = this.strictValidation(premises, conclusion);
           
           // If invalid, automatically include detailed gap analysis
+          let gapAnalysis = null;
           if (!validation.validation.overallValid) {
-            (validation as any).automaticGapAnalysis = this.diagnoseLogicalGaps(argument);
+            gapAnalysis = this.diagnoseLogicalGaps(argument);
+            (validation as any).automaticGapAnalysis = gapAnalysis;
           }
+          
+          const enhancedValidation = {
+            ...validation,
+            guidance: validation.validation.overallValid ?
+              "✅ VALIDATION PASSED: Argument structure is logically valid." :
+              "❌ CRITICAL FAILURE: ARGUMENT REJECTED. This argument is logically invalid and provides no support for your conclusion. You MUST fix the logical structure before proceeding.",
+            next_steps: validation.validation.overallValid ?
+              ["✅ SUCCESS: Argument is valid and ready for use."] :
+              this.generateSpecificNextSteps(gapAnalysis, this.parser.parseArgument(argument))
+          };
           
           return {
             content: [
               {
                 type: "text",
-                text: JSON.stringify(validation, null, 2),
+                text: JSON.stringify(enhancedValidation, null, 2),
               },
             ],
           };
@@ -312,11 +334,37 @@ class RelevanceLogicServer {
           
           const structuredAnalysis = this.structureArgument(argument, context);
           
+          // Check if the structured argument has potential issues and provide specific guidance
+          const hasRelevanceIssues = !structuredAnalysis.relevancePreCheck?.hasAtomicSharing;
+          const structuralIssues = structuredAnalysis.relevancePreCheck?.potentialIssues || [];
+          
+          // Add atomic formula examples and specific next steps
+          const enhancedAnalysis = {
+            ...structuredAnalysis,
+            atomic_formula_examples: {
+              description: "Atomic formulas are the basic building blocks - simple predicate statements that cannot be broken down further",
+              examples: [
+                "mammal(dolphin) - 'dolphin is a mammal'",
+                "warm_blooded(x) - 'x is warm-blooded'", 
+                "larger(elephant, mouse) - 'elephant is larger than mouse'",
+                "student(john) - 'john is a student'",
+                "studies_hard(x) - 'x studies hard'"
+              ],
+              note: "These atomic formulas must appear EXACTLY in both premises and conclusion for valid relevance logic"
+            },
+            guidance: hasRelevanceIssues ?
+              "⚠️ WARNING: This argument structure has potential logical issues that will likely cause validation failure. Review the identified issues below." :
+              "✅ STRUCTURE LOOKS PROMISING: This argument structure appears to have proper atomic sharing for relevance logic.",
+            next_steps: hasRelevanceIssues ?
+              this.generateStructuralNextSteps(structuralIssues, structuredAnalysis) :
+              ["Structure appears valid", "Run rlmcp_reason or validate_argument to confirm logical validity"]
+          };
+          
           return {
             content: [
               {
                 type: "text",
-                text: JSON.stringify(structuredAnalysis, null, 2),
+                text: JSON.stringify(enhancedAnalysis, null, 2),
               },
             ],
           };
@@ -394,6 +442,8 @@ class RelevanceLogicServer {
             // Return combined validation: BOTH logic AND evidence must pass
             const overallValid = analysis.validation_results.overallValid && complianceReport.isCompliant;
             
+            const evidenceSummary = this.evidenceModule.generateComplianceSummary(complianceReport.requirements);
+            
             return {
               content: [{
                 type: "text",
@@ -401,8 +451,12 @@ class RelevanceLogicServer {
                   original_rlmcp_analysis: analysis,
                   evidence_analysis: {
                     logical_validity: analysis.validation_results.overallValid ? "VALID" : "INVALID",
-                    evidence_completeness: complianceReport.isCompliant ? "COMPLETE" : "INCOMPLETE",
+                    evidence_completeness: complianceReport.isCompliant ? "COMPLETE" : `INCOMPLETE - Evidence needed for ${evidenceSummary.atomsRequired - evidenceSummary.atomsProvided} atoms, ${evidenceSummary.implicationsRequired - evidenceSummary.implicationsProvided} implications`,
                     overall_status: overallValid ? "VALID_WITH_EVIDENCE" : "REQUIRES_EVIDENCE",
+                    progress: `Evidence provided for ${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} requirements`,
+                    guidance: overallValid ? 
+                      "✅ COMPLETE SUCCESS: Argument is logically valid with complete evidence support. Task completed successfully." :
+                      "❌ CRITICAL FAILURE: TASK REJECTED. Full success requires BOTH logical validity AND complete evidence for every atom and implication. Your current work is INCOMPLETE and does not meet requirements. You MUST continue providing evidence for all logical components, or revise premises/conclusion to create a stronger argument. DO NOT CLAIM SUCCESS UNTIL BOTH CONDITIONS ARE MET.",
                     evidence_requirements: complianceReport.requirements.map(req => ({
                       type: req.type,
                       target: req.target,
@@ -410,7 +464,7 @@ class RelevanceLogicServer {
                       provided: req.provided,
                       evidence: req.evidence || null
                     })),
-                    evidence_summary: this.evidenceModule.generateComplianceSummary(complianceReport.requirements)
+                    evidence_summary: evidenceSummary
                   }
                 }, null, 2)
               }]
@@ -1185,6 +1239,77 @@ Do this validation transparently, then present the improved reasoning.`
       improvedConclusion: targetConclusion || "Reformulated to share predicates with premises",
       explanation: "Proper formalization requires atomic predicates, explicit logical relationships, and syntactic sharing"
     };
+  }
+
+  private generateStructuralNextSteps(structuralIssues: string[], structuredAnalysis: any): string[] {
+    const steps = ["⚠️ STRUCTURAL ISSUES DETECTED - Fix before validation:"];
+    
+    if (structuralIssues.length > 0) {
+      structuralIssues.forEach((issue, i) => {
+        steps.push(`${i + 1}. ${issue}`);
+      });
+    }
+    
+    // Check for specific sharing issues
+    const sharingDetails = structuredAnalysis.relevancePreCheck?.sharingDetails;
+    if (sharingDetails) {
+      const premisesWithoutSharing = sharingDetails.premiseAnalysis?.filter((p: any) => !p.hasExactSharing) || [];
+      
+      if (premisesWithoutSharing.length > 0) {
+        steps.push("CRITICAL: These premises have no atomic sharing with conclusion:");
+        premisesWithoutSharing.forEach((premise: any) => {
+          steps.push(`  - Premise ${premise.premiseIndex + 1}: "${premise.premise}"`);
+          steps.push(`    MISSING: Atomic formulas that connect to conclusion`);
+        });
+        steps.push("REQUIRED FIX: Revise premises to include atomic formulas that appear in your conclusion");
+      }
+    }
+    
+    steps.push("NEXT: After fixing these issues, run validate_argument or rlmcp_reason");
+    return steps;
+  }
+
+  private generateSpecificNextSteps(gapAnalysis: any, structured: any): string[] {
+    const steps = ["❌ STOP: Your argument has been REJECTED as logically invalid"];
+    
+    if (gapAnalysis) {
+      // Add specific steps based on the actual gaps found
+      const syntacticIssues = gapAnalysis.gapAnalysis?.syntacticSharing;
+      const missingBridges = gapAnalysis.gapAnalysis?.logicalBridges?.missingBridges || [];
+      const missingPremises = gapAnalysis.gapAnalysis?.implicitPremises?.missingPremises || [];
+      
+      if (syntacticIssues?.unsharedAtomicFormulas?.length > 0) {
+        steps.push(`CRITICAL ISSUE: Your conclusion contains atomic formulas [${syntacticIssues.unsharedAtomicFormulas.join(', ')}] that don't appear in any premise`);
+        steps.push("REQUIRED FIX: Add premises containing these exact atomic formulas OR change your conclusion to use only shared formulas");
+      }
+      
+      if (missingBridges.length > 0) {
+        steps.push("MISSING LOGICAL BRIDGES:");
+        missingBridges.forEach((bridge: any, i: number) => {
+          steps.push(`${i + 1}. ${bridge.description}`);
+          if (bridge.suggestedPremise) {
+            steps.push(`   SOLUTION: Add premise: "${bridge.suggestedPremise}"`);
+          }
+        });
+      }
+      
+      if (missingPremises.length > 0) {
+        steps.push("MISSING REQUIRED PREMISES:");
+        missingPremises.forEach((premise: any, i: number) => {
+          steps.push(`${i + 1}. Add: "${premise.premise}" (${premise.justification})`);
+        });
+      }
+      
+      if (steps.length === 1) { // Only the stop message was added
+        steps.push("GENERAL ISSUE: No syntactic sharing between premises and conclusion");
+        steps.push("REQUIRED FIX: Ensure your premises contain the same atomic formulas that appear in your conclusion");
+      }
+    } else {
+      steps.push("REQUIRED ACTION: Use diagnose_gaps tool to identify specific logical issues");
+    }
+    
+    steps.push("THEN: Re-run rlmcp_reason with your revised argument");
+    return steps;
   }
 
   private generateFormalizationSteps(naturalStatement: string, targetConclusion: string): string[] {
