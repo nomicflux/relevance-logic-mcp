@@ -198,6 +198,33 @@ class RelevanceLogicServer {
               required: []
             }
           },
+          {
+            name: "dig_in",
+            description: "Orchestration tool for strengthening weak evidence. Setup mode extracts evidence into sub-arguments for improvement. Cleanup mode integrates completed sub-arguments back into original argument.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                mode: {
+                  type: "string",
+                  enum: ["setup", "cleanup"],
+                  description: "Setup extracts evidence for sub-argument work. Cleanup integrates completed sub-argument back."
+                },
+                evidence_output: {
+                  type: "string",
+                  description: "JSON output from evidence_gathering tool (required for setup mode)"
+                },
+                target_requirement_index: {
+                  type: "number",
+                  description: "Index of evidence requirement to dig into (required for both modes)"
+                },
+                completed_subargument: {
+                  type: "string", 
+                  description: "Completed and validated sub-argument text (required for cleanup mode)"
+                }
+              },
+              required: ["mode", "target_requirement_index"]
+            }
+          },
         ] satisfies Tool[],
       };
     });
@@ -580,6 +607,176 @@ class RelevanceLogicServer {
               text: JSON.stringify(helpContent, null, 2)
             }]
           };
+        }
+
+        case "dig_in": {
+          const { mode, evidence_output, target_requirement_index, completed_subargument } = args as { 
+            mode: "setup" | "cleanup"; 
+            evidence_output?: string; 
+            target_requirement_index: number; 
+            completed_subargument?: string 
+          };
+
+          if (mode === "setup") {
+            // Setup mode: Extract evidence and create sub-argument
+            if (!evidence_output) {
+              throw new Error("evidence_output is required for setup mode");
+            }
+
+            try {
+              const evidenceAnalysis = JSON.parse(evidence_output);
+              if (!evidenceAnalysis.evidence_analysis?.evidence_requirements) {
+                throw new Error("Invalid evidence_gathering output - missing evidence_requirements");
+              }
+
+              const requirements = evidenceAnalysis.evidence_analysis.evidence_requirements;
+              if (target_requirement_index < 0 || target_requirement_index >= requirements.length) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                      error: "INVALID_INDEX",
+                      message: `Index ${target_requirement_index} out of range. Available indices: 0-${requirements.length - 1}`,
+                      available_requirements: requirements.map((req: any, i: number) => ({
+                        index: i,
+                        type: req.type,
+                        target: req.target,
+                        provided: req.provided
+                      }))
+                    }, null, 2)
+                  }]
+                };
+              }
+
+              const targetRequirement = requirements[target_requirement_index];
+              if (!targetRequirement.evidence) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                      error: "NO_EVIDENCE",
+                      message: `Requirement ${target_requirement_index} has no evidence to dig into yet. Provide evidence first.`,
+                      requirement: targetRequirement
+                    }, null, 2)
+                  }]
+                };
+              }
+
+              // Create sub-argument structure
+              const evidencePremise = `Premise 1: ${targetRequirement.evidence.summary}`;
+              const targetConclusion = `Conclusion: ${targetRequirement.target.replace(/[()]/g, '').replace(/→/g, 'implies').replace(/∧/g, 'and').replace(/∨/g, 'or')}`;
+              const subArgument = `${evidencePremise}\n\n${targetConclusion}`;
+
+              return {
+                content: [{
+                  type: "text", 
+                  text: JSON.stringify({
+                    setup_result: {
+                      sub_argument_text: subArgument,
+                      original_context: {
+                        evidence_output: evidence_output,
+                        target_requirement_index: target_requirement_index,
+                        original_requirement: targetRequirement
+                      },
+                      instructions: [
+                        "1. Use 'rlmcp_reason' on the sub_argument_text above",
+                        "2. The argument will likely FAIL validation (logical gap between evidence and conclusion)",
+                        "3. Use 'diagnose_gaps' to identify missing logical bridges", 
+                        "4. Add missing premises to create a valid logical chain",
+                        "5. Re-run 'rlmcp_reason' until the sub-argument is logically valid",
+                        "6. Run 'evidence_gathering' to ensure all premises have evidence",
+                        "7. When complete, use 'dig_in' with mode='cleanup' to integrate back"
+                      ],
+                      target_conclusion: targetRequirement.target,
+                      evidence_strength: targetRequirement.evidence.strength,
+                      evidence_citation: targetRequirement.evidence.citation
+                    }
+                  }, null, 2)
+                }]
+              };
+
+            } catch (error) {
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    error: "INVALID_INPUT",
+                    message: "Failed to parse evidence_gathering output",
+                    details: error instanceof Error ? error.message : String(error)
+                  }, null, 2)
+                }]
+              };
+            }
+
+          } else if (mode === "cleanup") {
+            // Cleanup mode: Integrate completed sub-argument back into original
+            if (!evidence_output || !completed_subargument) {
+              throw new Error("evidence_output and completed_subargument are required for cleanup mode");
+            }
+
+            try {
+              const evidenceAnalysis = JSON.parse(evidence_output);
+              const originalAnalysis = evidenceAnalysis.original_rlmcp_analysis;
+              
+              if (!originalAnalysis) {
+                throw new Error("Invalid evidence_gathering output - missing original_rlmcp_analysis");
+              }
+
+              // Parse the completed sub-argument to extract logical chain
+              const subArg = this.parser.parseArgument(completed_subargument);
+              const subPremises = subArg.premises.map((p: any) => p.originalText);
+
+              // Extract the original argument premises
+              const originalArg = this.parser.parseArgument(originalAnalysis.original_task);
+              const originalPremises = originalArg.premises.map((p: any) => p.originalText);
+              
+              // Replace the target premise with the expanded logical chain
+              const updatedPremises = [...originalPremises];
+              
+              // Find and replace the target premise with sub-argument premises
+              const requirements = evidenceAnalysis.evidence_analysis.evidence_requirements;
+              const targetRequirement = requirements[target_requirement_index];
+              const targetText = targetRequirement.target.replace(/[()]/g, '').replace(/→/g, 'implies').replace(/∧/g, 'and').replace(/∨/g, 'or');
+              
+              // Replace with expanded premises from sub-argument
+              updatedPremises.splice(target_requirement_index, 0, ...subPremises);
+
+              // Reconstruct the argument
+              const updatedArgument = updatedPremises.map((p, i) => `P${i + 1}. ${p}`).join('\n') + 
+                `\nConclusion: ${originalArg.conclusion.originalText}`;
+
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    integration_result: {
+                      updated_argument: updatedArgument,
+                      integration_summary: `Replaced premise ${target_requirement_index + 1} with ${subPremises.length} expanded premises from sub-argument`,
+                      original_premise_count: originalPremises.length,
+                      new_premise_count: updatedPremises.length,
+                      expanded_premises: subPremises,
+                      validation_status: "Integration complete - run 'rlmcp_reason' and 'evidence_gathering' to validate expanded argument"
+                    }
+                  }, null, 2)
+                }]
+              };
+
+            } catch (error) {
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    error: "INTEGRATION_FAILED", 
+                    message: "Failed to integrate completed sub-argument",
+                    details: error instanceof Error ? error.message : String(error)
+                  }, null, 2)
+                }]
+              };
+            }
+
+          } else {
+            throw new Error(`Invalid mode: ${mode}. Must be 'setup' or 'cleanup'`);
+          }
         }
 
         default:
