@@ -242,6 +242,27 @@ class RelevanceLogicServer {
           // Step 2: Structure into argument form
           const structured = this.parser.parseArgument(task);
           
+          // Check for empty premises - indicates tool misuse
+          if (structured.premises.length === 0) {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  error: "NO_PREMISES_FOUND",
+                  message: "❌ TOOL MISUSE: No premises detected in your input. An argument requires premises and a conclusion.",
+                  guidance: "You are likely using rlmcp_reason incorrectly. Use helper tools first:",
+                  required_steps: [
+                    "1. Use 'formalize_reasoning' to convert natural language into logical form",
+                    "2. Use 'structure_argument' to organize premises and conclusion",
+                    "3. THEN use 'rlmcp_reason' to validate the structured argument"
+                  ],
+                  your_input: task,
+                  what_we_need: "Clear premises and conclusion in format: 'Premise 1: ... Premise 2: ... Conclusion: ...'"
+                }, null, 2)
+              }]
+            };
+          }
+          
           // Step 3: Validate the logic
           const validation = this.strictValidation(
             structured.premises.map(p => p.formula),
@@ -254,12 +275,11 @@ class RelevanceLogicServer {
             gapAnalysis = this.diagnoseLogicalGaps(task);
           }
           
-          const logicalStatus = validation.validation.overallValid ? "VALID" : 
-            `INVALID - gaps remaining: ${gapAnalysis ? gapAnalysis.gapAnalysis.logicalBridges.missingBridges.map(b => b.description).join('; ') : "logical structure issues"}`;
+          const logicalStatus = validation.validation.overallValid ? "valid" : "invalid";
 
           const guidance = validation.validation.overallValid ? 
             "✅ LOGICAL VALIDATION PASSED: Argument is valid and ready for use." :
-            "❌ CRITICAL FAILURE: LOGICAL VALIDATION REJECTED. Your argument is worthless and provides zero logical support for your conclusion. This is not a minor issue - your entire reasoning has been rejected as logically invalid. You MUST fix this before proceeding with any other work. The tool will not assist you until logical validity is achieved. NEXT STEPS: Revise your premises or change your conclusion to create a valid argument structure. If struggling, use the 'rlmcp_help' tool for detailed guidance on logical validity requirements.";
+            "❌ CRITICAL FAILURE: LOGICAL VALIDATION REJECTED. Your argument is worthless and provides zero logical support for your conclusion. This is not a minor issue - your entire reasoning has been rejected as logically invalid. You MUST fix this before proceeding with any other work. The tool will not assist you until logical validity is achieved. NEXT STEPS: Revise your premises or change your conclusion to create a valid argument structure. If struggling, use the 'rlmcp_help' tool for detailed guidance.";
 
           return {
             content: [
@@ -274,7 +294,7 @@ class RelevanceLogicServer {
                       conclusion: structured.conclusion.originalText,
                       logical_structure: logicalStatus
                     },
-                    validation_results: validation.validation,
+                    validation_results: { overallValid: validation.validation.overallValid },
                     gap_analysis: gapAnalysis,
                     guidance: guidance,
                     next_steps: validation.validation.overallValid ? 
@@ -320,6 +340,28 @@ class RelevanceLogicServer {
           };
           
           const parsedArg = this.parser.parseArgument(argument);
+          
+          // Check for empty premises - indicates tool misuse
+          if (parsedArg.premises.length === 0) {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  error: "NO_PREMISES_FOUND",
+                  message: "❌ TOOL MISUSE: No premises detected in your argument. Arguments require premises and a conclusion.",
+                  guidance: "Use helper tools to structure your argument first:",
+                  required_steps: [
+                    "1. Use 'formalize_reasoning' to convert natural language into logical form",
+                    "2. Use 'structure_argument' to organize premises and conclusion",
+                    "3. THEN use 'validate_argument' to check the structured argument"
+                  ],
+                  your_input: argument,
+                  what_we_need: "Clear premises and conclusion in format: 'Premise 1: ... Premise 2: ... Conclusion: ...'"
+                }, null, 2)
+              }]
+            };
+          }
+          
           const premises = parsedArg.premises.map(p => p.formula);
           const conclusion = parsedArg.conclusion.formula;
           
@@ -492,13 +534,11 @@ class RelevanceLogicServer {
                 text: JSON.stringify({
                   original_rlmcp_analysis: analysis,
                   evidence_analysis: {
-                    logical_validity: analysis.validation_results.overallValid ? "VALID" : "INVALID",
-                    evidence_completeness: complianceReport.isCompliant ? "COMPLETE" : `INCOMPLETE - Evidence needed for ${evidenceSummary.atomsRequired - evidenceSummary.atomsProvided} atoms, ${evidenceSummary.implicationsRequired - evidenceSummary.implicationsProvided} implications`,
-                    overall_status: overallValid ? "VALID_WITH_EVIDENCE" : "REQUIRES_EVIDENCE",
+                    overall_status: overallValid ? "valid_with_evidence" : (analysis.validation_results.overallValid ? "invalid_and_not_supported" : "invalid"),
                     progress: `Evidence provided for ${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} requirements`,
                     guidance: overallValid ? 
                       "✅ COMPLETE SUCCESS: Argument is logically valid with complete evidence support. Task completed successfully." :
-                      "❌ CRITICAL FAILURE: TASK REJECTED. Full success requires BOTH logical validity AND complete evidence for every atom and implication. Your current work is INCOMPLETE and does not meet requirements. You MUST continue providing evidence for all logical components, or revise premises/conclusion to create a stronger argument. DO NOT CLAIM SUCCESS UNTIL BOTH CONDITIONS ARE MET. If struggling, use the 'rlmcp_help' tool for guidance on evidence requirements.",
+                      "❌ CRITICAL FAILURE: TASK REJECTED. Full success requires BOTH logical validity AND complete evidence for every logical component. Your current work is INCOMPLETE and does not meet requirements. You MUST continue providing evidence for all missing components, or revise your argument structure. DO NOT CLAIM SUCCESS UNTIL BOTH CONDITIONS ARE MET. If struggling, use the 'rlmcp_help' tool for guidance.",
                     evidence_requirements: complianceReport.requirements.map(req => ({
                       type: req.type,
                       target: req.target,
@@ -883,23 +923,11 @@ Do this validation transparently, then present the improved reasoning.`
         conclusion: FormulaUtils.toString(conclusion)
       },
       validation: {
-        systemRCompliant: systemRValidation.isValid,
-        ternaryRelationsValid: systemRValidation.ternaryRelations.length === premises.length,
         overallValid: systemRValidation.isValid
       },
       errors: [] as string[],
       warnings: [] as string[],
-      details: {
-        ternaryRelations: systemRValidation.ternaryRelations.map(tr => ({
-          source: FormulaUtils.toString(tr.source),
-          target: FormulaUtils.toString(tr.target),
-          sharedAtoms: tr.context.sharedAtoms.map(atom => FormulaUtils.toString(atom)),
-          informationFlow: tr.context.informationFlow,
-          relevanceStrength: tr.context.relevanceStrength
-        })),
-        violatedConstraints: systemRValidation.violatedConstraints,
-        relevanceMap: Object.fromEntries(systemRValidation.relevanceMap)
-      }
+      // Technical details removed - agent only needs to know valid/invalid
     };
 
     // Add errors for System R violations
