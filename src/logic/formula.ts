@@ -132,6 +132,56 @@ export class FormulaBuilder {
 export class FormulaUtils {
 
   /**
+   * Find connected components based on predicate sharing
+   */
+  private static findConnectedComponents(formulas: LogicFormula[]): LogicFormula[][] {
+    if (formulas.length === 0) return [];
+    
+    const visited = new Set<number>();
+    const components: LogicFormula[][] = [];
+    
+    for (let i = 0; i < formulas.length; i++) {
+      if (!visited.has(i)) {
+        const component: LogicFormula[] = [];
+        this.dfsConnectedComponent(formulas, i, visited, component);
+        components.push(component);
+      }
+    }
+    
+    return components;
+  }
+  
+  /**
+   * DFS to find all formulas connected to the starting formula
+   */
+  private static dfsConnectedComponent(formulas: LogicFormula[], startIndex: number, visited: Set<number>, component: LogicFormula[]): void {
+    visited.add(startIndex);
+    component.push(formulas[startIndex]);
+    
+    for (let i = 0; i < formulas.length; i++) {
+      if (!visited.has(i) && this.sharesPredicates(formulas[startIndex], formulas[i])) {
+        this.dfsConnectedComponent(formulas, i, visited, component);
+      }
+    }
+  }
+  
+  /**
+   * Check if two formulas share predicates/atoms (connection relation p <= q)
+   */
+  private static sharesPredicates(formula1: LogicFormula, formula2: LogicFormula): boolean {
+    const predicates1 = formula1.predicates || new Set();
+    const predicates2 = formula2.predicates || new Set();
+    
+    // Check for any shared predicate
+    for (const predicate of predicates1) {
+      if (predicates2.has(predicate)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * EXACT SYNTACTIC SHARING: Check if two formulas share identical atomic formulas
    * This is the CORRECT relevance logic requirement, not just variable name similarity
    */
@@ -632,74 +682,28 @@ export class FormulaUtils {
     return true; // Non-multiplicative formulas pass by default
   }
   
-  /**
-   * Check linear resource usage in premises - each resource consumed exactly once
-   * Linear Logic: "Each premise 'consumed' exactly once in valid inference"
-   */
-  static checkLinearResourceUsage(premises: LogicFormula[]): boolean {
-    const resourceMap = new Map<string, number>();
-    
-    // Count resource usage across all premises
-    for (const premise of premises) {
-      const resources = this.extractMultiplicativeResources(premise);
-      
-      for (const resource of resources) {
-        const resourceKey = this.getResourceKey(resource);
-        const currentCount = resourceMap.get(resourceKey) || 0;
-        resourceMap.set(resourceKey, currentCount + 1);
-      }
-    }
-    
-    // In linear logic, each resource must be used exactly once
-    for (const [resourceKey, count] of resourceMap.entries()) {
-      if (count !== 1) {
-        return false; // Resource used more or less than once
-      }
-    }
-    
-    return true;
-  }
   
   /**
-   * Validate tensor decomposition: A ⊗ B requires both A and B to be "consumed"
+   * Validate tensor decomposition: A ⊗ B (simplified without linear resources)
    */
   static validateTensorDecomposition(formula: LogicFormula): boolean {
     if (formula.operator !== 'times' || !formula.subformulas || formula.subformulas.length !== 2) {
       return true; // Not a tensor, trivially valid
     }
-    
-    const [left, right] = formula.subformulas;
-    
-    // Both operands must be consumable resources
-    const leftResources = this.extractMultiplicativeResources(left);
-    const rightResources = this.extractMultiplicativeResources(right);
-    
-    // Check that left and right don't share resources (linear constraint)
-    for (const leftRes of leftResources) {
-      for (const rightRes of rightResources) {
-        if (this.resourcesIdentical(leftRes, rightRes)) {
-          return false; // Same resource used twice - violates linearity
-        }
-      }
-    }
-    
+
+    // Simplified validation without linear resource tracking
     return true;
   }
   
   /**
-   * Validate linear implication: A ⊸ B preserves resource constraints
-   * Lollipop requires that A is consumed to produce B
+   * Validate linear implication: A ⊸ B (simplified without resource tracking)
    */
   static validateLinearImplication(antecedent: LogicFormula, consequent: LogicFormula): boolean {
-    const antecedentResources = this.extractMultiplicativeResources(antecedent);
-    const consequentResources = this.extractMultiplicativeResources(consequent);
-    
-    // Linear implication must preserve resource balance
-    // The antecedent resources are "consumed" to produce consequent resources
-    
-    // Check that antecedent and consequent have compatible resource patterns
-    // For System R: must maintain variable sharing while respecting linearity
-    return this.checkLinearResourceBalance(antecedentResources, consequentResources);
+    // Simplified validation - check for basic variable sharing
+    const antecedentVars = Array.from(antecedent.variables || []);
+    const consequentVars = Array.from(consequent.variables || []);
+
+    return antecedentVars.some(v => consequentVars.includes(v));
   }
   
   /**
@@ -719,117 +723,17 @@ export class FormulaUtils {
       case 'lollipop': // A ⊸ B - linear implication
         return this.validateLinearImplication(left, right);
         
-      case 'par': // A ⅋ B - multiplicative disjunction with resource constraints
-        return this.validateParDecomposition(left, right);
+      case 'par': // A ⅋ B - multiplicative disjunction (simplified)
+        return true;
         
       default:
         return true;
     }
   }
   
-  /**
-   * Extract multiplicative resources from a formula for linear tracking
-   */
-  private static extractMultiplicativeResources(formula: LogicFormula): LogicFormula[] {
-    if (formula.type === 'atomic') {
-      return [formula];
-    }
-    
-    const resources: LogicFormula[] = [];
-    
-    if (formula.subformulas) {
-      for (const sub of formula.subformulas) {
-        resources.push(...this.extractMultiplicativeResources(sub));
-      }
-    }
-    
-    return resources;
-  }
   
-  /**
-   * Get unique key for resource tracking in linear logic
-   */
-  private static getResourceKey(resource: LogicFormula): string {
-    if (resource.type === 'atomic') {
-      const terms = resource.terms || [];
-      const termStr = terms.map(t => `${t.type}:${t.name}`).join(',');
-      return `${resource.predicate}(${termStr})`;
-    }
-    
-    return resource.id || 'unknown';
-  }
   
-  /**
-   * Check if two resources are identical for linear logic purposes
-   */
-  private static resourcesIdentical(res1: LogicFormula, res2: LogicFormula): boolean {
-    return this.atomicFormulasIdentical(res1, res2);
-  }
   
-  /**
-   * Validate Par decomposition: A ⅋ B (multiplicative disjunction)
-   */
-  private static validateParDecomposition(left: LogicFormula, right: LogicFormula): boolean {
-    // Par (⅋) is the multiplicative disjunction
-    // In System R, it requires resource-conscious handling
-    const leftResources = this.extractMultiplicativeResources(left);
-    const rightResources = this.extractMultiplicativeResources(right);
-    
-    // Par allows sharing of resources between alternatives (unlike tensor)
-    // But must maintain System R relevance constraints
-    return this.checkRelevanceInMultiplicativeContext(leftResources, rightResources);
-  }
-  
-  /**
-   * Check linear resource balance for implication
-   */
-  private static checkLinearResourceBalance(antecedentRes: LogicFormula[], consequentRes: LogicFormula[]): boolean {
-    // For linear implication A ⊸ B:
-    // The resources in A are consumed to produce resources in B
-    // This must respect System R variable sharing
-    
-    if (antecedentRes.length === 0 || consequentRes.length === 0) {
-      return false;
-    }
-    
-    // Check that there's some resource flow from antecedent to consequent
-    // In multiplicative context, variable sharing is sufficient (not full atomic identity)
-    return antecedentRes.some(antRes => 
-      consequentRes.some(consRes => {
-        if (antRes.type === 'atomic' && consRes.type === 'atomic') {
-          const antVars = Array.from(antRes.variables || []);
-          const consVars = Array.from(consRes.variables || []);
-          return antVars.some(v => consVars.includes(v));
-        }
-        return false;
-      })
-    );
-  }
-  
-  /**
-   * Check relevance constraints in multiplicative context
-   */
-  private static checkRelevanceInMultiplicativeContext(leftRes: LogicFormula[], rightRes: LogicFormula[]): boolean {
-    // In multiplicative context, we need some form of connection
-    // but not necessarily exact identity (looser than additive case)
-    
-    if (leftRes.length === 0 || rightRes.length === 0) {
-      return true; // Empty resources are allowed
-    }
-    
-    // Check for variable sharing between resources
-    // In multiplicative context, variable sharing is sufficient
-    return leftRes.some(left => 
-      rightRes.some(right => {
-        if (left.type === 'atomic' && right.type === 'atomic') {
-          const leftVars = Array.from(left.variables || []);
-          const rightVars = Array.from(right.variables || []);
-          return leftVars.some(v => rightVars.includes(v));
-        }
-        return false;
-      })
-    );
-  }
   
   /**
    * Check multiplicative unit laws: I (multiplicative unit) and ⊥ (bottom)
@@ -906,17 +810,65 @@ export class FormulaUtils {
     const violatedConstraints: string[] = [];
     const relevanceMap = new Map<string, RelevanceContext>();
     
-    // SYSTEM R REQUIREMENT: Every premise must establish ternary relation with conclusion
+    // CIRCULAR REASONING CHECK: Detect if conclusion appears as premise (direct or in conjunction)
     for (let i = 0; i < premises.length; i++) {
       const premise = premises[i];
-      const relation = this.createTernaryRelation(premise, conclusion);
       
-      if (!relation) {
-        violatedConstraints.push(`Premise ${i + 1} has no ternary relation to conclusion - violates System R`);
-      } else {
-        ternaryRelations.push(relation);
-        relevanceMap.set(`premise_${i}`, relation.context);
+      // Check for direct circular reasoning: premise identical to conclusion
+      if (this.toString(premise) === this.toString(conclusion)) {
+        violatedConstraints.push(`CIRCULAR REASONING: Premise ${i + 1} is identical to conclusion - indicates missing explicit premises`);
+        return {
+          isValid: false,
+          violatedConstraints,
+          ternaryRelations: [],
+          relevanceMap: new Map()
+        };
       }
+      
+      // Check for circular reasoning in conjunctions: premise contains conclusion as conjunct
+      if (premise.operator === 'and' && premise.subformulas) {
+        for (const conjunct of premise.subformulas) {
+          if (this.toString(conjunct) === this.toString(conclusion)) {
+            violatedConstraints.push(`CIRCULAR REASONING: Premise ${i + 1} contains conclusion as conjunct - indicates missing explicit premises`);
+            return {
+              isValid: false,
+              violatedConstraints,
+              ternaryRelations: [],
+              relevanceMap: new Map()
+            };
+          }
+        }
+      }
+    }
+    
+    // CONNECTED COMPONENTS CHECK: All formulas must form single connected component
+    const allFormulas = [...premises, conclusion];
+    const components = this.findConnectedComponents(allFormulas);
+    
+    if (components.length > 1) {
+      // Find which component contains the conclusion
+      const conclusionComponent = components.find(comp => 
+        comp.some(formula => this.toString(formula) === this.toString(conclusion))
+      );
+      
+      // Identify disconnected premises
+      const disconnectedPremises: number[] = [];
+      premises.forEach((premise, index) => {
+        const premiseInConclusionComponent = conclusionComponent?.some(formula => 
+          this.toString(formula) === this.toString(premise)
+        );
+        if (!premiseInConclusionComponent) {
+          disconnectedPremises.push(index + 1);
+        }
+      });
+      
+      violatedConstraints.push(`DISCONNECTED: ${disconnectedPremises.length} premise(s) not connected to conclusion - remove premises: P${disconnectedPremises.join(', P')}`);
+      return {
+        isValid: false,
+        violatedConstraints,
+        ternaryRelations: [],
+        relevanceMap: new Map()
+      };
     }
     
     // STEP 4: QUANTIFIER SCOPE COMPLIANCE CHECK
@@ -926,42 +878,37 @@ export class FormulaUtils {
       
       // Check if premise and conclusion have compatible quantifier sharing
       if (!this.validateQuantifierSharing(premise, conclusion)) {
-        violatedConstraints.push(`Premise ${i + 1} has incompatible quantifier variable binding with conclusion - violates System R`);
+        violatedConstraints.push(`Premise ${i + 1} has incompatible quantifier variable binding with conclusion`);
       }
     }
     
     // STEP 5: DISTRIBUTION COMPLIANCE CHECK
     // System R requires proper distribution law compliance
     if (!this.checkDistributionCompliance(premises, conclusion)) {
-      violatedConstraints.push('Distribution laws violated - does not comply with System R distribution axioms');
+      violatedConstraints.push('Distribution laws violated');
     }
     
     // STEP 6: MULTIPLICATIVE LOGIC CONSTRAINTS CHECK  
     // System R requires proper multiplicative semantics and linear resource usage
-    const allFormulas = [...premises, conclusion];
+    const formulasToCheck = [...premises, conclusion];
     
     // Check each formula for multiplicative constraint compliance
-    for (let i = 0; i < allFormulas.length; i++) {
-      const formula = allFormulas[i];
+    for (let i = 0; i < formulasToCheck.length; i++) {
+      const formula = formulasToCheck[i];
       
       if (!this.validateMultiplicativeSharing(formula)) {
         const formulaType = i < premises.length ? `Premise ${i + 1}` : 'Conclusion';
-        violatedConstraints.push(`${formulaType} violates multiplicative logic constraints - does not comply with System R`);
+        violatedConstraints.push(`${formulaType} violates multiplicative logic constraints`);
       }
       
       if (!this.validateMultiplicativeUnits(formula)) {
         const formulaType = i < premises.length ? `Premise ${i + 1}` : 'Conclusion';
-        violatedConstraints.push(`${formulaType} violates multiplicative unit laws - does not comply with System R`);
+        violatedConstraints.push(`${formulaType} violates multiplicative unit laws`);
       }
     }
     
-    // Check linear resource usage across all premises (only if multiplicative connectives are present)
-    const hasMultiplicativeConnectives = allFormulas.some(f => this.containsMultiplicativeConnectives(f));
-    if (hasMultiplicativeConnectives && !this.checkLinearResourceUsage(premises)) {
-      violatedConstraints.push('Linear resource usage violated - premises do not comply with System R multiplicative semantics');
-    }
     
-    const isValid = violatedConstraints.length === 0 && ternaryRelations.length === premises.length;
+    const isValid = violatedConstraints.length === 0;
     
     return {
       isValid: isValid,

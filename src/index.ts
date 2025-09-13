@@ -48,7 +48,7 @@ class RelevanceLogicServer {
         tools: [
           {
             name: "rlmcp_reason",
-            description: "Use RLMCP (Relevance Logic MCP) to construct logically rigorous explanations and arguments. Automatically handles parsing, structuring, validation, and gap-filling to ensure reasoning meets strict logical standards.",
+            description: "Construct logically rigorous arguments using relevance logic. Validates premise-conclusion connections and identifies logical gaps.",
             inputSchema: {
               type: "object",
               properties: {
@@ -67,13 +67,13 @@ class RelevanceLogicServer {
           },
           {
             name: "parse_statement",
-            description: "Parse natural language into formal relevance logic with multiplicative connectives",
+            description: "Parse natural language into formal logical structure",
             inputSchema: {
               type: "object",
               properties: {
                 statement: {
                   type: "string",
-                  description: "Natural language statement (supports multiplicative operators: 'times', 'lollipop', 'tensor')",
+                  description: "Natural language statement to parse",
                 },
               },
               required: ["statement"],
@@ -81,13 +81,13 @@ class RelevanceLogicServer {
           },
           {
             name: "validate_argument",
-            description: "[HELPER TOOL] Only use when user explicitly requests argument validation. Works with rlmcp_reason to validate logical structure. Do not use proactively.",
+            description: "[HELPER TOOL] Validate argument logical structure. User-requested only.",
             inputSchema: {
               type: "object",
               properties: {
                 argument: {
                   type: "string",
-                  description: "Logical argument with premises and conclusion",
+                  description: "Argument to validate",
                 },
               },
               required: ["argument"],
@@ -95,14 +95,14 @@ class RelevanceLogicServer {
           },
           {
             name: "check_relevance",
-            description: "[HELPER TOOL] Only use when user asks to check relevance. Works with rlmcp_reason for premise-conclusion analysis. Do not use proactively.",
+            description: "[HELPER TOOL] Check premise-conclusion relevance. User-requested only.",
             inputSchema: {
               type: "object",
               properties: {
                 premises: {
                   type: "array",
                   items: { type: "string" },
-                  description: "Array of premise statements",
+                  description: "Premise statements",
                 },
                 conclusion: {
                   type: "string",
@@ -114,17 +114,17 @@ class RelevanceLogicServer {
           },
           {
             name: "structure_argument",
-            description: "[HELPER TOOL] Only use when user asks to structure an argument. Works with rlmcp_reason for argument organization. Do not use proactively.",
+            description: "[HELPER TOOL] Structure natural language into logical argument form. User-requested only.",
             inputSchema: {
               type: "object",
               properties: {
                 argument: {
                   type: "string",
-                  description: "Natural language argument to structure",
+                  description: "Argument to structure",
                 },
                 context: {
                   type: "string",
-                  description: "Additional context about the domain or intended interpretation",
+                  description: "Domain context",
                   default: ""
                 },
               },
@@ -133,13 +133,13 @@ class RelevanceLogicServer {
           },
           {
             name: "diagnose_gaps",
-            description: "[HELPER TOOL] Only use when user asks to diagnose gaps or when rlmcp_reason validation fails. Works with rlmcp_reason for gap analysis. Do not use proactively.",
+            description: "[HELPER TOOL] Diagnose logical gaps in invalid arguments. User-requested only.",
             inputSchema: {
               type: "object",
               properties: {
                 argument: {
                   type: "string",
-                  description: "Natural language argument to diagnose for System R compliance",
+                  description: "Argument to diagnose",
                 },
               },
               required: ["argument"],
@@ -147,17 +147,17 @@ class RelevanceLogicServer {
           },
           {
             name: "formalize_reasoning",
-            description: "[HELPER TOOL] Only use when user asks to formalize reasoning. Works with rlmcp_reason for logical formalization. Do not use proactively.",
+            description: "[HELPER TOOL] Convert natural language to formal logical structure. User-requested only.",
             inputSchema: {
               type: "object",
               properties: {
                 naturalStatement: {
                   type: "string",
-                  description: "Natural language reasoning to formalize",
+                  description: "Reasoning to formalize",
                 },
                 targetConclusion: {
                   type: "string",
-                  description: "What the reasoning is trying to prove",
+                  description: "Target conclusion",
                   default: ""
                 },
               },
@@ -166,17 +166,17 @@ class RelevanceLogicServer {
           },
           {
             name: "evidence_gathering",
-            description: "Optional add-on tool for rlmcp_reason. Takes the structured logical output from rlmcp_reason and requires evidence for each atom and implication. Validates both logical structure AND evidence completeness.",
+            description: "Evidence gathering for logically valid arguments. Requires evidence for atoms and implications. Works with rlmcp_reason output.",
             inputSchema: {
               type: "object",
               properties: {
                 rlmcp_output: {
                   type: "string",
-                  description: "JSON output from rlmcp_reason containing structured logical analysis"
+                  description: "rlmcp_reason JSON output"
                 },
                 context: {
                   type: "string",
-                  description: "Additional context for evidence gathering",
+                  description: "Evidence context",
                   default: ""
                 }
               },
@@ -185,13 +185,13 @@ class RelevanceLogicServer {
           },
           {
             name: "rlmcp_help",
-            description: "Get help when struggling with RLMCP logical validation or evidence gathering. Provides guidance on common issues and approaches.",
+            description: "Get guidance for RLMCP validation struggles. Provides solutions for common logical issues.",
             inputSchema: {
               type: "object",
               properties: {
                 struggling_with: {
                   type: "string",
-                  description: "What specific aspect are you struggling with? (e.g., 'logical validity', 'evidence gathering', 'connecting premises', 'tool seems too restrictive')",
+                  description: "What you're struggling with",
                   default: "general guidance"
                 }
               },
@@ -200,26 +200,26 @@ class RelevanceLogicServer {
           },
           {
             name: "dig_in",
-            description: "[USER-INITIATED ONLY] Use ONLY when user explicitly asks to 'dig in' or strengthen specific evidence. Never use proactively. Requires user to specify which evidence requirement to expand.",
+            description: "[USER-INITIATED ONLY] Expand specific evidence into sub-arguments. User must explicitly request and specify target requirement.",
             inputSchema: {
               type: "object",
               properties: {
                 mode: {
                   type: "string",
                   enum: ["setup", "cleanup"],
-                  description: "Setup extracts evidence for sub-argument work. Cleanup integrates completed sub-argument back."
+                  description: "setup or cleanup mode"
                 },
                 evidence_output: {
                   type: "string",
-                  description: "JSON output from evidence_gathering tool (required for setup mode)"
+                  description: "evidence_gathering output"
                 },
                 target_requirement_index: {
                   type: "number",
-                  description: "Index of evidence requirement to dig into (required for both modes)"
+                  description: "Evidence requirement index"
                 },
                 completed_subargument: {
                   type: "string", 
-                  description: "Completed and validated sub-argument text (required for cleanup mode)"
+                  description: "Completed sub-argument"
                 }
               },
               required: ["mode", "target_requirement_index"]
@@ -247,17 +247,16 @@ class RelevanceLogicServer {
             return {
               content: [{
                 type: "text",
-                text: JSON.stringify({
+text: JSON.stringify({
                   error: "NO_PREMISES_FOUND",
-                  message: "❌ TOOL MISUSE: No premises detected in your input. An argument requires premises and a conclusion.",
-                  guidance: "You are likely using rlmcp_reason incorrectly. Use helper tools first:",
-                  required_steps: [
-                    "1. Use 'formalize_reasoning' to convert natural language into logical form",
-                    "2. Use 'structure_argument' to organize premises and conclusion",
-                    "3. THEN use 'rlmcp_reason' to validate the structured argument"
+                  message: "❌ No premises detected. Use helper tools first:",
+                  steps: [
+                    "1. formalize_reasoning - convert to logical form",
+                    "2. structure_argument - organize premises/conclusion", 
+                    "3. rlmcp_reason - validate structured argument",
+                    "If struggling: use rlmcp_help for general guidance"
                   ],
-                  your_input: task,
-                  what_we_need: "Clear premises and conclusion in format: 'Premise 1: ... Premise 2: ... Conclusion: ...'"
+                  need: "Format: 'Premise 1: ... Conclusion: ...'"
                 }, null, 2)
               }]
             };
@@ -277,9 +276,12 @@ class RelevanceLogicServer {
           
           const logicalStatus = validation.validation.overallValid ? "valid" : "invalid";
 
+          const isCircular = validation.validation.failures.some((f: string) => f.includes('CIRCULAR REASONING'));
           const guidance = validation.validation.overallValid ? 
-            "✅ LOGICAL VALIDATION PASSED: Argument is valid and ready for use." :
-            "❌ CRITICAL FAILURE: LOGICAL VALIDATION REJECTED. Your argument is worthless and provides zero logical support for your conclusion. This is not a minor issue - your entire reasoning has been rejected as logically invalid. You MUST fix this before proceeding with any other work. The tool will not assist you until logical validity is achieved. NEXT STEPS: Revise your premises or change your conclusion to create a valid argument structure. If struggling, use the 'rlmcp_help' tool for detailed guidance.";
+            "✅ Valid - ready for use" :
+            isCircular ? 
+              "❌ CIRCULAR REASONING - you're not being explicit about your intuitions and domain knowledge. Make implicit assumptions into explicit premises." :
+              "❌ INVALID - argument rejected. Must fix logical structure before proceeding. Use rlmcp_help if struggling.";
 
           return {
             content: [
@@ -298,7 +300,7 @@ class RelevanceLogicServer {
                     gap_analysis: gapAnalysis,
                     guidance: guidance,
                     next_steps: validation.validation.overallValid ? 
-                      ["✅ SUCCESS: Logical validation passed. If evidence is required, use the evidence_gathering tool with this output."] :
+                      ["✅ Use evidence_gathering if evidence needed"] :
                       this.generateSpecificNextSteps(gapAnalysis, structured),
                     recommendations: gapAnalysis?.recommendations || [
                       "All premises properly connect to conclusion through exact syntactic sharing"
@@ -319,7 +321,7 @@ class RelevanceLogicServer {
               {
                 type: "text",
                 text: JSON.stringify({
-                  version: "2.0.0 - STRICT COMPLIANCE",
+                  version: "2.0.0",
                   original: parsed.originalText,
                   symbolic: FormulaUtils.toString(parsed.formula),
                   variables: Array.from(parsed.formula.variables),
@@ -346,17 +348,16 @@ class RelevanceLogicServer {
             return {
               content: [{
                 type: "text",
-                text: JSON.stringify({
+text: JSON.stringify({
                   error: "NO_PREMISES_FOUND",
-                  message: "❌ TOOL MISUSE: No premises detected in your argument. Arguments require premises and a conclusion.",
-                  guidance: "Use helper tools to structure your argument first:",
-                  required_steps: [
-                    "1. Use 'formalize_reasoning' to convert natural language into logical form",
-                    "2. Use 'structure_argument' to organize premises and conclusion",
-                    "3. THEN use 'validate_argument' to check the structured argument"
+                  message: "❌ No premises found. Use helper tools:",
+                  steps: [
+                    "1. formalize_reasoning",
+                    "2. structure_argument", 
+                    "3. validate_argument",
+                    "If struggling: use rlmcp_help for guidance"
                   ],
-                  your_input: argument,
-                  what_we_need: "Clear premises and conclusion in format: 'Premise 1: ... Premise 2: ... Conclusion: ...'"
+                  need: "Format: 'Premise 1: ... Conclusion: ...'"
                 }, null, 2)
               }]
             };
@@ -378,10 +379,12 @@ class RelevanceLogicServer {
           const enhancedValidation = {
             ...validation,
             guidance: validation.validation.overallValid ?
-              "✅ VALIDATION PASSED: Argument structure is logically valid." :
-              "❌ CRITICAL FAILURE: ARGUMENT REJECTED. This argument is logically invalid and provides no support for your conclusion. You MUST fix the logical structure before proceeding. If struggling, use the 'rlmcp_help' tool for guidance.",
+              "✅ Valid" :
+              validation.validation.failures.some((f: string) => f.includes('CIRCULAR REASONING')) ?
+                "❌ Circular reasoning - make implicit assumptions explicit" :
+                "❌ Invalid - fix logical structure. Use rlmcp_help if needed.",
             next_steps: validation.validation.overallValid ?
-              ["✅ SUCCESS: Argument is valid and ready for use."] :
+              ["✅ Valid and ready"] :
               this.generateSpecificNextSteps(gapAnalysis, this.parser.parseArgument(argument))
           };
           
@@ -425,23 +428,15 @@ class RelevanceLogicServer {
           // Add atomic formula examples and specific next steps
           const enhancedAnalysis = {
             ...structuredAnalysis,
-            atomic_formula_examples: {
-              description: "Atomic formulas are the basic building blocks - simple predicate statements that cannot be broken down further",
-              examples: [
-                "mammal(dolphin) - 'dolphin is a mammal'",
-                "warm_blooded(x) - 'x is warm-blooded'", 
-                "larger(elephant, mouse) - 'elephant is larger than mouse'",
-                "student(john) - 'john is a student'",
-                "studies_hard(x) - 'x studies hard'"
-              ],
-              note: "These atomic formulas must appear EXACTLY in both premises and conclusion for valid relevance logic"
-            },
+            examples: [
+              "mammal(dolphin)", "warm_blooded(x)", "larger(elephant,mouse)"
+            ],
             guidance: hasRelevanceIssues ?
-              "⚠️ WARNING: This argument structure has potential logical issues that will likely cause validation failure. Review the identified issues below." :
-              "✅ STRUCTURE LOOKS PROMISING: This argument structure appears to have proper atomic sharing for relevance logic.",
+              "⚠️ Potential issues - review below" :
+              "✅ Structure looks good",
             next_steps: hasRelevanceIssues ?
               this.generateStructuralNextSteps(structuralIssues, structuredAnalysis) :
-              ["Structure appears valid", "Run rlmcp_reason or validate_argument to confirm logical validity"]
+              ["Run rlmcp_reason to validate"]
           };
           
           return {
@@ -503,11 +498,10 @@ class RelevanceLogicServer {
               return {
                 content: [{
                   type: "text",
-                  text: JSON.stringify({
+text: JSON.stringify({
                     error: "LOGICAL_VALIDATION_FAILED",
-                    message: "Evidence cannot be gathered for logically invalid arguments. Fix logical structure first using 'rlmcp_reason' tool, then return with valid output. If struggling with logical validity, use the 'rlmcp_help' tool.",
-                    original_analysis: analysis,
-                    logical_issues: analysis.gap_analysis || analysis.validation_results
+                    message: "Fix logic first with rlmcp_reason. Use rlmcp_help if struggling.",
+                    issues: analysis.gap_analysis || analysis.validation_results
                   }, null, 2)
                 }]
               };
@@ -535,10 +529,10 @@ class RelevanceLogicServer {
                   original_rlmcp_analysis: analysis,
                   evidence_analysis: {
                     overall_status: overallValid ? "valid_with_evidence" : (analysis.validation_results.overallValid ? "invalid_and_not_supported" : "invalid"),
-                    progress: `Evidence provided for ${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} requirements`,
+                    progress: `${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} evidence provided`,
                     guidance: overallValid ? 
-                      "✅ COMPLETE SUCCESS: Argument is logically valid with complete evidence support. Task completed successfully." :
-                      "❌ CRITICAL FAILURE: TASK REJECTED. Full success requires BOTH logical validity AND complete evidence for every logical component. Your current work is INCOMPLETE and does not meet requirements. You MUST continue providing evidence for all missing components, or revise your argument structure. DO NOT CLAIM SUCCESS UNTIL BOTH CONDITIONS ARE MET. If struggling, use the 'rlmcp_help' tool for guidance.",
+                      "✅ Success - valid with complete evidence" :
+                      "❌ Incomplete - need both logic AND evidence. Use rlmcp_help if struggling.",
                     evidence_requirements: complianceReport.requirements.map(req => ({
                       type: req.type,
                       target: req.target,
@@ -570,84 +564,53 @@ class RelevanceLogicServer {
           const { struggling_with } = args as { struggling_with?: string };
           
           const helpContent = {
-            message: "🆘 RLMCP Help - Don't Give Up! This tool can work with proper approach.",
+            message: "🆘 RLMCP Help - This tool works with proper approach",
             
-            mindset_shift: {
-              title: "❌ WRONG THINKING vs ✅ RIGHT THINKING",
-              wrong: "This logical validity tool is too restrictive for real-world tasks",
-              right: "If I struggle to fit my argument to the tool, there's something in my argument I'm not making explicit. I need to be clearer about my intuitions, domain knowledge, and assumptions.",
-              key_point: "The tool exposes gaps in reasoning that need to be filled, not avoided."
+            mindset: {
+              wrong: "Tool too restrictive",
+              right: "Tool exposes gaps I need to fill explicitly"
             },
             
-            logical_building_blocks: {
-              title: "🧱 Basic Logical Building Blocks You Can Use:",
-              atomic_facts: {
-                description: "Simple statements about the world",
-                examples: ["mammal(dolphin)", "warm_blooded(x)", "large_project(x)", "maintainable(typescript_code)"]
-              },
-              conjunctions: {
-                description: "AND statements - both things are true",
-                examples: ["P(x) ∧ Q(x) - 'x has both property P and property Q'"],
-                usage: "Use when multiple conditions must be met"
-              },
-              disjunctions: {
-                description: "OR statements - at least one thing is true", 
-                examples: ["P(x) ∨ Q(x) - 'x has either property P or property Q (or both)'"],
-                usage: "Use when multiple paths lead to the same conclusion"
-              },
-              implications: {
-                description: "IF-THEN statements - the most important connector",
-                examples: [
-                  "mammal(x) → warm_blooded(x) - 'if x is a mammal, then x is warm-blooded'",
-                  "large_project(x) → needs_structure(x) - 'if x is a large project, then x needs structure'",
-                  "needs_structure(x) → typescript_better(x) - 'if x needs structure, then typescript is better for x'"
-                ],
-                critical_usage: "Use implications to connect premises to each other AND to your conclusion. Chain them together to build logical paths."
-              }
+            blocks: {
+              atoms: ["mammal(dolphin)", "warm_blooded(x)"],
+              and: "P(x) ∧ Q(x)",
+              or: "P(x) ∨ Q(x)", 
+              implies: ["mammal(x) → warm_blooded(x)", "Chain implications to build logical paths"]
             },
             
-            simplicity_principle: {
-              title: "✨ KEEP IT SIMPLE - More Premises ≠ Stronger Logic:",
-              key_insight: "A single premise + single implication + conclusion can be PERFECT. Don't add unnecessary premises.",
-              common_mistake: "WRONG: P1: has_static_typing(typescript), P2: lacks_static_typing(javascript), P3: has_advanced_ide_support(typescript), P4: has_basic_ide_support(javascript), P5: enforces_interface_contracts(typescript), P6: lacks_interface_contracts(javascript), C: typescript_better_for_large_projects(typescript)",
-              why_wrong: "This creates 6 premises that are hard to connect and require tons of evidence. Most are unnecessary.",
-              right_approach: "CORRECT: P1: has_static_typing(typescript), P2: static_typing_better_for_large_projects(static_typing), C: typescript_better_for_large_projects(typescript)",
-              rule: "Pick ONE key differentiator, not every possible difference. Each premise must be NECESSARY.",
-              testing: "If you can remove a premise and the argument still works, remove it immediately."
+            simplicity: {
+              rule: "Single premise + implication can be perfect",
+              wrong: "6 premises comparing every feature",
+              right: "P1: has_static_typing(ts), P2: static_typing_better_large_projects, C: ts_better_large_projects",
+              test: "If you can remove a premise and argument still works, remove it"
             },
             
-            evidence_gathering_guidance: {
-              title: "📋 When Evidence is Required:",
-              atoms_need_evidence: "Every atomic statement needs evidence: mammal(dolphin) needs proof that dolphins are mammals",
-              implications_need_evidence: "⚠️ CRITICAL: Implications need evidence too! mammal(x) → warm_blooded(x) needs evidence that mammals are warm-blooded",
-              evidence_format: "Each piece of evidence needs: (summary, strength 0-1, citation)",
-              no_shortcuts: "There are no shortcuts - every logical component needs evidence when requested"
+            evidence: {
+              atoms: "Every atomic statement needs evidence",
+              implications: "Implications need evidence too",
+              format: "(summary, strength 0-1, citation)",
+              rule: "Every component needs evidence when requested"
             },
             
-            success_mindset: {
-              title: "🎯 What Success Looks Like:",
-              user_expectation: "If the user asked for this tool, they want STRICT LOGICAL VALIDITY. They do not want a half-done job.",
-              your_job: "Continue until successful. Change premises and conclusions as needed to match what is actually supported by evidence and contains logically valid connections.",
-              when_stuck: "If you cannot fill a logical gap, return to the user for help with that SPECIFIC gap. Don't give up - ask for clarification on the specific missing piece.",
-              persistence: "The tool rewards persistence and precision, not shortcuts."
+            success: {
+              goal: "Strict logical validity",
+              approach: "Continue until successful, change premises/conclusions as needed",
+              when_stuck: "Ask user for help with specific gap"
             },
             
-            common_fixes: {
-              title: "🔧 Common Solutions When Stuck:",
-              missing_connections: "Add implication premises that connect your existing premises to your conclusion",
-              too_big_a_leap: "Break down large logical jumps into smaller, more obvious steps",
-              domain_knowledge: "Make your domain expertise explicit as premises rather than assuming it",
-              evidence_gaps: "If evidence is missing, either find it or revise your claims to match available evidence",
-              wrong_conclusion: "Sometimes the logic leads to a different conclusion than you started with - follow the logic!"
+            fixes: {
+              connections: "Add implications connecting premises to conclusion",
+              big_leaps: "Break into smaller steps", 
+              domain: "Make expertise explicit as premises",
+              evidence: "Find evidence or revise claims"
             },
             
-            next_steps: [
-              "1. Identify the specific gap or error message you're getting",
-              "2. Use implications to bridge logical gaps between premises and conclusion", 
-              "3. Make implicit assumptions explicit as premises",
-              "4. If using evidence, provide evidence for EVERY atom and implication",
-              "5. Be willing to revise your conclusion to match what the logic actually supports",
-              "6. If truly stuck, ask the user for help with the specific missing piece"
+            steps: [
+              "1. Identify specific gap",
+              "2. Add implications to bridge gaps", 
+              "3. Make assumptions explicit",
+              "4. Provide evidence for all components",
+              "5. Revise conclusion if needed"
             ]
           };
           
@@ -841,22 +804,22 @@ class RelevanceLogicServer {
         prompts: [
           {
             name: "structure_reasoning",
-            description: "Use this prompt to automatically structure your reasoning before presenting explanations",
+            description: "Auto-structure reasoning before explanations",
             arguments: [
               {
                 name: "task",
-                description: "The task or question you need to reason about",
+                description: "Task to reason about",
                 required: true
               }
             ]
           },
           {
             name: "validate_logic",
-            description: "Use this prompt to validate your logical reasoning automatically",
+            description: "Auto-validate logical reasoning",
             arguments: [
               {
                 name: "reasoning",
-                description: "Your reasoning or argument to validate",
+                description: "Reasoning to validate",
                 required: true
               }
             ]
@@ -926,46 +889,78 @@ Do this validation transparently, then present the improved reasoning.`
     // SYSTEM R TERNARY RELATION VALIDATION - This is the CORRECT implementation
     const systemRValidation = FormulaUtils.validateSystemR(premises, conclusion);
     
+    // Extract detailed sharing analysis
+    const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
+    const premiseDetails = premises.map((premise, index) => {
+      const premiseAtoms = FormulaUtils.extractAtomicFormulas(premise);
+      const sharedAtoms = FormulaUtils.getSharedAtomicFormulas(premise, conclusion);
+      const hasSharing = FormulaUtils.hasExactAtomicSharing(premise, conclusion);
+      
+      return {
+        index: index + 1,
+        formula: FormulaUtils.toString(premise),
+        atomicFormulas: premiseAtoms.map(a => FormulaUtils.toString(a)),
+        sharedWithConclusion: sharedAtoms.map(a => FormulaUtils.toString(a)),
+        hasValidSharing: hasSharing
+      };
+    });
+    
     const analysis = {
-      version: "2.0.0 - SYSTEM R TERNARY RELATION SEMANTICS",
+      version: "2.0.0 - LOGICAL VALIDATION",
       argument: {
         premises: premises.map(p => FormulaUtils.toString(p)),
         conclusion: FormulaUtils.toString(conclusion)
       },
       validation: {
-        overallValid: systemRValidation.isValid
+        overallValid: systemRValidation.isValid,
+        failures: systemRValidation.isValid ? [] : systemRValidation.violatedConstraints,
+        detailedAnalysis: {
+          conclusionAtomicFormulas: conclusionAtoms.map(a => FormulaUtils.toString(a)),
+          premiseAnalysis: premiseDetails,
+          failingPremises: premiseDetails.filter(p => !p.hasValidSharing).map(p => ({
+            premise: p.index,
+            formula: p.formula,
+            issue: "No atomic formulas shared with conclusion",
+            missing: conclusionAtoms.map(a => FormulaUtils.toString(a)).filter(atom => 
+              !p.atomicFormulas.includes(atom)
+            )
+          }))
+        }
       },
       errors: [] as string[],
       warnings: [] as string[],
-      // Technical details removed - agent only needs to know valid/invalid
     };
 
-    // Add errors for System R violations
+    // Add errors for logical validation failures with specific guidance
     if (!systemRValidation.isValid) {
-      analysis.errors.push("SYSTEM R VIOLATION: Argument fails ternary relation requirements");
+      analysis.errors.push("LOGICAL VALIDATION FAILED: Argument has disconnected parts");
+
+      // Parse the specific constraint violations to give targeted guidance
       systemRValidation.violatedConstraints.forEach(constraint => {
         analysis.errors.push(constraint);
+
+        // Provide specific guidance based on the type of violation
+        if (constraint.includes('DISCONNECTED:')) {
+          // Extract premise numbers from disconnected constraint
+          const premiseMatches = constraint.match(/P(\d+(?:, P\d+)*)/);
+          if (premiseMatches) {
+            const disconnectedPremises = premiseMatches[1].split(', P').map(p => p.replace('P', ''));
+            analysis.errors.push(`SPECIFIC ISSUE: Premise${disconnectedPremises.length > 1 ? 's' : ''} ${disconnectedPremises.join(', ')} not connected to conclusion`);
+            analysis.errors.push("TO FIX: Add logical bridges connecting these premises to the conclusion");
+          }
+        } else if (constraint.includes('CIRCULAR REASONING:')) {
+          analysis.errors.push("TO FIX: Replace circular premise with explicit supporting premises");
+        } else if (constraint.includes('quantifier')) {
+          analysis.errors.push("TO FIX: Ensure quantifier variables are properly bound and shared");
+        }
       });
-      analysis.warnings.push("System R requires every premise to establish a ternary relation with the conclusion through shared atomic formulas");
+
+      analysis.warnings.push("Logical validation requires all premises to be connected to the conclusion through shared content");
     }
 
     return analysis;
   }
 
-  private checkExactSyntacticSharing(premises: LogicFormula[], conclusion: LogicFormula): boolean {
-    // Variable Sharing Principle (binary constraint):
-    // EVERY premise must share at least one atomic formula with the conclusion
-    // If ANY premise lacks sharing, the entire argument is invalid in relevance logic
-    
-    for (const premise of premises) {
-      const hasSharing = FormulaUtils.hasExactAtomicSharing(premise, conclusion);
-      if (!hasSharing) {
-        return false; // Invalid: this premise is irrelevant to the conclusion
-      }
-    }
-    
-    return true; // Valid: all premises satisfy the variable sharing requirement
-  }
 
   private analyzeSyntacticSharing(premises: LogicFormula[], conclusion: LogicFormula) {
     const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
@@ -1109,7 +1104,7 @@ Do this validation transparently, then present the improved reasoning.`
     );
     
     if (!hasAnyAtomicSharing) {
-      issues.push("No exact atomic formula sharing between premises and conclusion - System R violation");
+      issues.push("No atomic connections between premises and conclusion - may indicate disconnected argument parts");
     }
     
     // Check for complex nested structures that might need clarification
@@ -1122,19 +1117,12 @@ Do this validation transparently, then present the improved reasoning.`
   }
 
   private generateStructuralRecommendations(parsedArg: any, context: string): string[] {
-    const recommendations: string[] = [];
-    
-    recommendations.push("For relevance logic validation:");
-    recommendations.push("1. Ensure premises and conclusion share atomic formulas exactly");
-    recommendations.push("2. Use precise logical quantifiers (∀, ∃) when dealing with general statements");
-    recommendations.push("3. Make variable bindings explicit");
-    recommendations.push("4. Avoid irrelevant premises that don't contribute to the conclusion");
-    
-    if (context) {
-      recommendations.push(`5. Given context "${context}", consider domain-specific logical relationships`);
-    }
-    
-    return recommendations;
+    return [
+      "1. Share atomic formulas between premises and conclusion",
+      "2. Use quantifiers (∀, ∃) for general statements", 
+      "3. Make variable bindings explicit",
+      "4. Remove irrelevant premises"
+    ];
   }
 
   private diagnoseLogicalGaps(argument: string) {
@@ -1143,7 +1131,7 @@ Do this validation transparently, then present the improved reasoning.`
     const conclusion = parsedArg.conclusion.formula;
 
     const diagnosis = {
-      version: "2.0.0 - SYSTEM R GAP DIAGNOSTIC TOOL",
+      version: "2.0.0 - GAP DIAGNOSTIC TOOL",
       input: {
         originalArgument: argument
       },
@@ -1370,8 +1358,7 @@ Do this validation transparently, then present the improved reasoning.`
     const hasSharing = premises.some(p => FormulaUtils.hasExactAtomicSharing(p, conclusion));
     
     if (!hasSharing) {
-      recommendations.push("CRITICAL: Add premises that share exact atomic formulas with the conclusion");
-      recommendations.push("System R requires ternary relations - premises must connect to conclusion through shared content");
+      recommendations.push("Add premises sharing atomic formulas with conclusion");
     }
     
     const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
@@ -1383,12 +1370,11 @@ Do this validation transparently, then present the improved reasoning.`
       );
       
       if (!hasMatch) {
-        recommendations.push(`Add premise containing exactly: ${FormulaUtils.toString(cAtom)}`);
+        recommendations.push(`Add: ${FormulaUtils.toString(cAtom)}`);
       }
     });
     
-    recommendations.push("All reasoning must be purely syntactic - no domain-specific rules allowed in System R");
-    recommendations.push("Ensure exact variable identity between premises and conclusion");
+    recommendations.push("Use exact variable identity");
     
     return recommendations;
   }
@@ -1575,86 +1561,83 @@ Do this validation transparently, then present the improved reasoning.`
   }
 
   private generateStructuralNextSteps(structuralIssues: string[], structuredAnalysis: any): string[] {
-    const steps = ["⚠️ STRUCTURAL ISSUES DETECTED - Fix before validation:"];
+    const steps = ["⚠️ Fix issues before validation:"];
     
     if (structuralIssues.length > 0) {
-      structuralIssues.forEach((issue, i) => {
+      structuralIssues.slice(0,3).forEach((issue, i) => {
         steps.push(`${i + 1}. ${issue}`);
       });
     }
     
-    // Check for specific sharing issues
     const sharingDetails = structuredAnalysis.relevancePreCheck?.sharingDetails;
     if (sharingDetails) {
       const premisesWithoutSharing = sharingDetails.premiseAnalysis?.filter((p: any) => !p.hasExactSharing) || [];
       
       if (premisesWithoutSharing.length > 0) {
-        steps.push("CRITICAL: These premises have no atomic sharing with conclusion:");
-        premisesWithoutSharing.forEach((premise: any) => {
-          steps.push(`  - Premise ${premise.premiseIndex + 1}: "${premise.premise}"`);
-          steps.push(`    MISSING: Atomic formulas that connect to conclusion`);
+        steps.push("No sharing:");
+        premisesWithoutSharing.slice(0,2).forEach((premise: any) => {
+          steps.push(`P${premise.premiseIndex + 1}: needs connection to conclusion`);
         });
-        steps.push("REQUIRED FIX: Revise premises to include atomic formulas that appear in your conclusion");
+        steps.push("Fix: Include conclusion's atomic formulas in premises");
       }
     }
     
-    steps.push("NEXT: After fixing these issues, run validate_argument or rlmcp_reason");
+    steps.push("Next: Run validate_argument");
     return steps;
   }
 
   private generateSpecificNextSteps(gapAnalysis: any, structured: any): string[] {
-    const steps = ["❌ STOP: Your argument has been REJECTED as logically invalid"];
+    const steps = ["❌ Invalid argument - fix required"];
     
     if (gapAnalysis) {
-      // Add specific steps based on the actual gaps found
       const syntacticIssues = gapAnalysis.gapAnalysis?.syntacticSharing;
       const missingBridges = gapAnalysis.gapAnalysis?.logicalBridges?.missingBridges || [];
       const missingPremises = gapAnalysis.gapAnalysis?.implicitPremises?.missingPremises || [];
       
       if (syntacticIssues?.unsharedAtomicFormulas?.length > 0) {
-        steps.push(`CRITICAL ISSUE: Your conclusion contains atomic formulas [${syntacticIssues.unsharedAtomicFormulas.join(', ')}] that don't appear in any premise`);
-        steps.push("REQUIRED FIX: Add premises containing these exact atomic formulas OR change your conclusion to use only shared formulas");
+        steps.push(`Missing: [${syntacticIssues.unsharedAtomicFormulas.join(', ')}] in premises`);
+        steps.push("Fix: Add premises with these formulas OR change conclusion");
       }
       
       if (missingBridges.length > 0) {
-        steps.push("MISSING LOGICAL BRIDGES:");
-        missingBridges.forEach((bridge: any, i: number) => {
+        steps.push("Missing bridges:");
+        missingBridges.slice(0,3).forEach((bridge: any, i: number) => {
           steps.push(`${i + 1}. ${bridge.description}`);
           if (bridge.suggestedPremise) {
-            steps.push(`   SOLUTION: Add premise: "${bridge.suggestedPremise}"`);
+            steps.push(`   Add: "${bridge.suggestedPremise}"`);
           }
         });
       }
       
       if (missingPremises.length > 0) {
-        steps.push("MISSING REQUIRED PREMISES:");
-        missingPremises.forEach((premise: any, i: number) => {
-          steps.push(`${i + 1}. Add: "${premise.premise}" (${premise.justification})`);
+        steps.push("Missing premises:");
+        missingPremises.slice(0,2).forEach((premise: any, i: number) => {
+          steps.push(`${i + 1}. "${premise.premise}"`);
         });
       }
       
-      if (steps.length === 1) { // Only the stop message was added
-        steps.push("GENERAL ISSUE: No syntactic sharing between premises and conclusion");
-        steps.push("REQUIRED FIX: Ensure your premises contain the same atomic formulas that appear in your conclusion");
+      if (steps.length === 1) {
+        steps.push("No sharing between premises and conclusion");
+        steps.push("Fix: Use same atomic formulas in premises and conclusion");
       }
     } else {
-      steps.push("REQUIRED ACTION: Use diagnose_gaps tool to identify specific logical issues");
+      steps.push("Use diagnose_gaps to identify issues");
     }
     
-    steps.push("THEN: Re-run rlmcp_reason with your revised argument");
-    steps.push("If struggling with these requirements, use the 'rlmcp_help' tool for detailed guidance");
+    steps.push("Then: Re-run rlmcp_reason");
+    steps.push("Help: Use rlmcp_help if struggling");
     return steps;
   }
 
   private generateFormalizationSteps(naturalStatement: string, targetConclusion: string): string[] {
     return [
-      "1. IDENTIFY CORE CONCEPTS: Extract the main entities and properties",
-      "2. CREATE ATOMIC PREDICATES: Use simple predicate names like P(x), Q(y), not complex descriptions",
-      "3. ESTABLISH SHARED PREDICATES: Ensure conclusion predicates appear in premises",
-      "4. MAKE CONNECTIONS EXPLICIT: Replace 'because', 'therefore' with formal logical operators",
-      "5. USE PROPER QUANTIFIERS: Universal (∀) for general statements, existential (∃) for specific instances",
-      "6. VALIDATE SHARING: Check that premises and conclusion share atomic formulas exactly",
-      "7. TEST IN RELEVANCE LOGIC: Use validate_argument to confirm formal validity"
+      "1. Extract core concepts",
+      "2. Create simple predicates P(x), Q(y)",
+      "3. Share predicates between premises/conclusion",
+      "4. Replace 'because'/'therefore' with operators",
+      "5. Use quantifiers (∀/∃)",
+      "6. Validate sharing",
+      "7. Test with validate_argument"
     ];
   }
 

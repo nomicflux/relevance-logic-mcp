@@ -14,47 +14,45 @@ describe('System R Integration Tests', () => {
   });
 
   describe('End-to-End Argument Validation', () => {
-    test('validates proper logical connection', () => {
+    test('REJECTS direct copying as circular reasoning', () => {
       const argument = `
         Premise 1: Essential(sharing_detection)
         Conclusion: Essential(sharing_detection)
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
-      expect(validation.isValid).toBe(true);
+
+      expect(validation.isValid).toBe(false);
+      expect(validation.violatedConstraints).toContain('CIRCULAR REASONING: Premise 1 is identical to conclusion - indicates missing explicit premises');
     });
 
     test('rejects irrelevant premises (Dog/Cat case)', () => {
       const argument = `
         Premise 1: Dog(fido)
-        Premise 2: Cat(whiskers)  
+        Premise 2: Cat(whiskers)
         Premise 3: Essential(sharing_detection)
         Conclusion: Essential(sharing_detection)
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
+
       expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Premise 1 has no ternary relation to conclusion - violates System R');
-      expect(validation.violatedConstraints).toContain('Premise 2 has no ternary relation to conclusion - violates System R');
+      expect(validation.violatedConstraints).toContain('CIRCULAR REASONING: Premise 3 is identical to conclusion - indicates missing explicit premises');
     });
 
-    test('REJECTS complex formal logical input without exact sharing', () => {
-      // This should FAIL in System R because:
+    test('ACCEPTS complex formal logical reasoning with connected components', () => {
+      // This should PASS in System R because all formulas connect:
       // Premise 1: P(x) ∧ Q(x) - contains Q(x)
       // Premise 2: Q(x) → R(x) - contains Q(x) and R(x)
-      // Conclusion: R(x) - contains R(x)
-      // But P(x) from premise 1 does NOT appear in conclusion
-      // So premise 1 violates variable sharing principle
+      // Conclusion: R(x) - all formulas connected through Q(x) and R(x)
       const argument = `
         Premise 1: P(x) ∧ Q(x)
         Premise 2: Q(x) → R(x)  
@@ -67,8 +65,7 @@ describe('System R Integration Tests', () => {
       
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
       
-      expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints.length).toBeGreaterThan(0);
+      expect(validation.isValid).toBe(true);
     });
 
     test('REJECTS material implication paradox', () => {
@@ -76,13 +73,13 @@ describe('System R Integration Tests', () => {
         Premise 1: moon_is_cheese
         Conclusion: raining_or_not
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
+
       expect(validation.isValid).toBe(false);
     });
   });
@@ -94,24 +91,22 @@ describe('System R Integration Tests', () => {
         Premise 2: Essential(sharing_detection)
         Conclusion: Essential(sharing_detection)
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
+
       expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Premise 1 has no ternary relation to conclusion - violates System R');
+      expect(validation.violatedConstraints).toContain('CIRCULAR REASONING: Premise 2 is identical to conclusion - indicates missing explicit premises');
     });
 
-    test('REJECTS multiple premises where not all share with conclusion', () => {
-      // This should FAIL in System R because:
-      // Premise 1: P(a) - does NOT appear in conclusion Q(a)
-      // Premise 2: P(a) → Q(a) - contains both P(a) and Q(a)
-      // Conclusion: Q(a)
-      // System R requires ALL premises to share with conclusion
-      // Premise 1 does not share atomic formula with conclusion
+    test('ACCEPTS valid modus ponens pattern', () => {
+      // This should PASS in System R because:
+      // Premise 1: P(a) - connects to premise 2
+      // Premise 2: P(a) → Q(a) - connects premise 1 to conclusion
+      // Conclusion: Q(a) - all form single connected component
       const argument = `
         Premise 1: P(a)
         Premise 2: P(a) → Q(a)
@@ -124,8 +119,7 @@ describe('System R Integration Tests', () => {
       
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
       
-      expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Premise 1 has no ternary relation to conclusion - violates System R');
+      expect(validation.isValid).toBe(true);
     });
   });
 
@@ -135,20 +129,20 @@ describe('System R Integration Tests', () => {
         Premise 1: ∀x(P(x))
         Conclusion: ∃x(P(x))
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
+
       expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Premise 1 has incompatible quantifier variable binding with conclusion - violates System R');
+      expect(validation.violatedConstraints).toContain('Premise 1 has incompatible quantifier variable binding with conclusion');
     });
 
     test('accepts quantified formulas with compatible binding', () => {
       const argument = `
-        Premise 1: ∀x(mortal(x))
+        Premise 1: ∀x(human(x) → mortal(x))
         Conclusion: ∀x(mortal(x))
       `;
       
@@ -166,78 +160,78 @@ describe('System R Integration Tests', () => {
         Premise 1: ∀x(P(x) → Q(x))
         Conclusion: ∃x(P(x) → Q(x))
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
+
       expect(validation.isValid).toBe(false);
     });
   });
 
   describe('Step 5: Distribution Axioms Integration Tests', () => {
-    test('accepts proper conjunction distribution with exact atomic sharing', () => {
-      // Build formulas directly to avoid parser issues with nested parentheses
+    test('REJECTS conjunction with disconnected disjunction', () => {
+      // Build formulas with different predicates that don't properly connect
       const essential = FormulaBuilder.atomic('Essential', [{ type: 'variable', name: 'x' }]);
-      const essential2 = FormulaBuilder.atomic('Essential', [{ type: 'variable', name: 'x' }]);
-      const essential3 = FormulaBuilder.atomic('Essential', [{ type: 'variable', name: 'x' }]);
+      const important = FormulaBuilder.atomic('Important', [{ type: 'variable', name: 'x' }]);
+      const relevant = FormulaBuilder.atomic('Relevant', [{ type: 'variable', name: 'x' }]);
       
-      const disjunction = FormulaBuilder.compound('or', [essential2, essential3]);
+      const disjunction = FormulaBuilder.compound('or', [important, relevant]);
       const premise = FormulaBuilder.compound('and', [essential, disjunction]);
       const conclusion = FormulaBuilder.atomic('Essential', [{ type: 'variable', name: 'x' }]);
       
       const validation = FormulaUtils.validateSystemR([premise], conclusion);
       
-      expect(validation.isValid).toBe(true);
+      expect(validation.isValid).toBe(false);
     });
 
-    test('REJECTS distribution that breaks relevance principle', () => {
+    test('REJECTS conjunction copying as circular reasoning', () => {
       const argument = `
         Premise 1: Essential(x) ∧ (Irrelevant(y) ∨ Unrelated(z))
         Conclusion: Essential(x)
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
+
       expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Distribution laws violated - does not comply with System R distribution axioms');
+      expect(validation.violatedConstraints).toContain('CIRCULAR REASONING: Premise 1 contains conclusion as conjunct - indicates missing explicit premises');
     });
 
-    test('validates distribution laws in complex formulas with atomic sharing', () => {
-      // Build formulas directly to ensure proper atomic formula sharing
+    test('REJECTS distribution with disconnected predicates', () => {
+      // Build formulas with different predicates that don't properly connect
       const px = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
-      const px2 = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
-      const px3 = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
+      const qx = FormulaBuilder.atomic('Q', [{ type: 'variable', name: 'x' }]);
+      const rx = FormulaBuilder.atomic('R', [{ type: 'variable', name: 'x' }]);
       
-      const disjunction = FormulaBuilder.compound('or', [px2, px3]);
+      const disjunction = FormulaBuilder.compound('or', [qx, rx]);
       const premise = FormulaBuilder.compound('and', [px, disjunction]);
       const conclusion = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
       
       const validation = FormulaUtils.validateSystemR([premise], conclusion);
       
-      expect(validation.isValid).toBe(true);
+      expect(validation.isValid).toBe(false);
     });
 
-    test('REJECTS invalid distribution patterns', () => {
+    test('REJECTS another conjunction copying as circular reasoning', () => {
       const argument = `
         Premise 1: Dog(fido) ∧ (Cat(whiskers) ∨ Bird(tweety))
         Conclusion: Dog(fido)
       `;
-      
+
       const parsedArg = parser.parseArgument(argument);
       const premises = parsedArg.premises.map((p: any) => p.formula);
       const conclusion = parsedArg.conclusion.formula;
-      
+
       const validation = FormulaUtils.validateSystemR(premises, conclusion);
-      
+
       expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Distribution laws violated - does not comply with System R distribution axioms');
+      expect(validation.violatedConstraints).toContain('CIRCULAR REASONING: Premise 1 contains conclusion as conjunct - indicates missing explicit premises');
     });
   });
 
@@ -254,17 +248,16 @@ describe('System R Integration Tests', () => {
       expect(validation.isValid).toBe(true);
     });
 
-    test('REJECTS multiplicative tensor with duplicate resources', () => {
-      // Build P(x) ⊗ P(x) - same resource used twice
+    test('accepts multiplicative tensor (linear resource checking disabled)', () => {
+      // Build P(x) ⊗ P(x) - linear resource checking was removed
       const px1 = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
       const px2 = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
       const premise = FormulaBuilder.compound('times', [px1, px2]);
       const conclusion = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
-      
+
       const validation = FormulaUtils.validateSystemR([premise], conclusion);
-      
-      expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Premise 1 violates multiplicative logic constraints - does not comply with System R');
+
+      expect(validation.isValid).toBe(true);
     });
 
     test('validates linear implication with proper resource flow', () => {
@@ -284,17 +277,16 @@ describe('System R Integration Tests', () => {
       const px = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
       const unit = FormulaBuilder.compound('one', []);
       const multiplicativePremise1 = FormulaBuilder.compound('times', [px, unit]);
-      
+
       const px2 = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
       const unit2 = FormulaBuilder.compound('one', []);
       const multiplicativePremise2 = FormulaBuilder.compound('times', [px2, unit2]);
-      
+
       const conclusion = FormulaBuilder.atomic('P', [{ type: 'variable', name: 'x' }]);
-      
+
       const validation = FormulaUtils.validateSystemR([multiplicativePremise1, multiplicativePremise2], conclusion);
-      
-      expect(validation.isValid).toBe(false);
-      expect(validation.violatedConstraints).toContain('Linear resource usage violated - premises do not comply with System R multiplicative semantics');
+
+      expect(validation.isValid).toBe(true);
     });
 
     test('validates multiplicative units in complex contexts', () => {

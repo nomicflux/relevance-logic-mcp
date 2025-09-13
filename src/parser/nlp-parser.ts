@@ -293,6 +293,21 @@ export class NaturalLanguageParser {
   private parseSimpleStatement(statement: string, variables: Map<string, string>): LogicFormula {
     const trimmed = statement.trim();
     
+    // First check for formal predicate syntax: Predicate(term1, term2, ...)
+    const formalPredicateMatch = trimmed.match(/^(\w+)\s*\(\s*([^)]+)\s*\)$/);
+    if (formalPredicateMatch) {
+      const predicate = formalPredicateMatch[1];
+      const termString = formalPredicateMatch[2];
+      const terms = termString.split(',').map(t => {
+        const trimmedTerm = t.trim();
+        return {
+          type: /^[a-z]$/.test(trimmedTerm) ? 'variable' as const : 'constant' as const,
+          name: trimmedTerm
+        };
+      });
+      return FormulaBuilder.atomic(predicate, terms, trimmed);
+    }
+    
     const match = trimmed.match(/^(\w+)\s+(?:is|are)\s+(.+)$/i);
     if (match) {
       const subject = match[1].toLowerCase();
@@ -513,6 +528,12 @@ export class NaturalLanguageParser {
 
   private parseLogicalExpression(expression: string, vars: Map<string, string>): LogicFormula {
     const trimmed = expression.trim();
+    
+    // Handle parentheses for grouping - extract contents and parse recursively
+    if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+      const inner = trimmed.slice(1, -1).trim();
+      return this.parseLogicalExpression(inner, vars);
+    }
     
     // Try formal logical operators first - implication
     const implicationMatch = trimmed.match(/^(.+)\s*→\s*(.+)$/);
