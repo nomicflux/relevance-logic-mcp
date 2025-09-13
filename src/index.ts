@@ -606,6 +606,16 @@ class RelevanceLogicServer {
               }
             },
             
+            simplicity_principle: {
+              title: "✨ KEEP IT SIMPLE - More Premises ≠ Stronger Logic:",
+              key_insight: "A single premise + single implication + conclusion can be PERFECT. Don't add unnecessary premises.",
+              common_mistake: "WRONG: P1: has_static_typing(typescript), P2: lacks_static_typing(javascript), P3: has_advanced_ide_support(typescript), P4: has_basic_ide_support(javascript), P5: enforces_interface_contracts(typescript), P6: lacks_interface_contracts(javascript), C: typescript_better_for_large_projects(typescript)",
+              why_wrong: "This creates 6 premises that are hard to connect and require tons of evidence. Most are unnecessary.",
+              right_approach: "CORRECT: P1: has_static_typing(typescript), P2: static_typing_better_for_large_projects(static_typing), C: typescript_better_for_large_projects(typescript)",
+              rule: "Pick ONE key differentiator, not every possible difference. Each premise must be NECESSARY.",
+              testing: "If you can remove a premise and the argument still works, remove it immediately."
+            },
+            
             evidence_gathering_guidance: {
               title: "📋 When Evidence is Required:",
               atoms_need_evidence: "Every atomic statement needs evidence: mammal(dolphin) needs proof that dolphins are mammals",
