@@ -81,7 +81,7 @@ class RelevanceLogicServer {
           },
           {
             name: "validate_argument",
-            description: "Ensure explanations involving multiple premises avoid logical gaps and fallacies. Particularly useful for comparative arguments, causal explanations, and complex reasoning chains.",
+            description: "[HELPER TOOL] Only use when user explicitly requests argument validation. Works with rlmcp_reason to validate logical structure. Do not use proactively.",
             inputSchema: {
               type: "object",
               properties: {
@@ -95,7 +95,7 @@ class RelevanceLogicServer {
           },
           {
             name: "check_relevance",
-            description: "Check exact syntactic sharing between premises and conclusion",
+            description: "[HELPER TOOL] Only use when user asks to check relevance. Works with rlmcp_reason for premise-conclusion analysis. Do not use proactively.",
             inputSchema: {
               type: "object",
               properties: {
@@ -114,7 +114,7 @@ class RelevanceLogicServer {
           },
           {
             name: "structure_argument",
-            description: "Transform complex explanations into clear logical structure when dealing with multi-step reasoning, comparisons, or justifications. Helps organize thoughts before presenting.",
+            description: "[HELPER TOOL] Only use when user asks to structure an argument. Works with rlmcp_reason for argument organization. Do not use proactively.",
             inputSchema: {
               type: "object",
               properties: {
@@ -133,7 +133,7 @@ class RelevanceLogicServer {
           },
           {
             name: "diagnose_gaps",
-            description: "Identify logical gaps using System R ternary relation requirements. Provides purely syntactic analysis without domain-specific rules.",
+            description: "[HELPER TOOL] Only use when user asks to diagnose gaps or when rlmcp_reason validation fails. Works with rlmcp_reason for gap analysis. Do not use proactively.",
             inputSchema: {
               type: "object",
               properties: {
@@ -147,7 +147,7 @@ class RelevanceLogicServer {
           },
           {
             name: "formalize_reasoning",
-            description: "Strengthen reasoning by making implicit logical connections explicit. Essential when explanations involve cause-and-effect relationships or require rigorous justification.",
+            description: "[HELPER TOOL] Only use when user asks to formalize reasoning. Works with rlmcp_reason for logical formalization. Do not use proactively.",
             inputSchema: {
               type: "object",
               properties: {
@@ -200,7 +200,7 @@ class RelevanceLogicServer {
           },
           {
             name: "dig_in",
-            description: "Orchestration tool for strengthening weak evidence. Setup mode extracts evidence into sub-arguments for improvement. Cleanup mode integrates completed sub-arguments back into original argument.",
+            description: "[USER-INITIATED ONLY] Use ONLY when user explicitly asks to 'dig in' or strengthen specific evidence. Never use proactively. Requires user to specify which evidence requirement to expand.",
             inputSchema: {
               type: "object",
               properties: {
