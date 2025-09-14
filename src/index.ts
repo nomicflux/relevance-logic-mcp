@@ -166,7 +166,7 @@ class RelevanceLogicServer {
           },
           {
             name: "evidence_gathering",
-            description: "Validate that EVERY atom and implication has evidence. Only succeeds when ALL have complete evidence triples. Put evidence in context parameter like: 'atom/implication: summary=evidence text, strength=0.8, citation=source'",
+            description: "Validate evidence AND force analysis of conflicts. Provide evidence_items as ARRAY OF OBJECTS, each object containing: {target, summary, strength (-1 to 1, negative=contradicts, positive=supports, zero=neutral), citation}. Tool will analyze conflicts and present requirements for self-analysis. Only succeeds when ALL evidence complete.",
             inputSchema: {
               type: "object",
               properties: {
@@ -174,13 +174,22 @@ class RelevanceLogicServer {
                   type: "string",
                   description: "rlmcp_reason JSON output"
                 },
-                context: {
-                  type: "string",
-                  description: "Evidence for each atom/implication. Format: 'target: summary=text, strength=0.5, citation=source' (one per line)",
-                  default: ""
+                evidence_items: {
+                  type: "array",
+                  description: "Evidence for each atom/implication",
+                  items: {
+                    type: "object",
+                    properties: {
+                      target: { type: "string", description: "The atom/implication this evidence is for" },
+                      summary: { type: "string", description: "Evidence text" },
+                      strength: { type: "number", description: "Evidence strength -1.0 to 1.0. Negative values contradict the claim, positive values support it, values close to zero are neutral", minimum: -1, maximum: 1 },
+                      citation: { type: "string", description: "Source of evidence" }
+                    },
+                    required: ["target", "summary", "strength", "citation"]
+                  }
                 }
               },
-              required: ["rlmcp_output"],
+              required: ["rlmcp_output", "evidence_items"],
             },
           },
           {
@@ -502,7 +511,15 @@ text: JSON.stringify({
         }
         
         case "evidence_gathering": {
-          const { rlmcp_output, context } = args as { rlmcp_output: string; context?: string };
+          const { rlmcp_output, evidence_items } = args as {
+            rlmcp_output: string;
+            evidence_items: Array<{
+              target: string;
+              summary: string;
+              strength: number;
+              citation: string;
+            }>;
+          };
 
           try {
             // Parse the rlmcp_reason output
@@ -533,15 +550,12 @@ text: JSON.stringify({
               }
             });
 
-            // Parse evidence from context parameter
-            const providedEvidence = this.parseEvidenceFromContext(context || "");
-
-            // Check if every atom and implication has complete evidence
+            // Check if every atom and implication has complete enhanced evidence
             const missingEvidence: string[] = [];
             const allRequiredItems = [...Array.from(atomsNeededEvidence), ...Array.from(implicationsNeededEvidence)];
 
             allRequiredItems.forEach(item => {
-              const evidence = providedEvidence.find(e => e.target === item);
+              const evidence = evidence_items.find(e => e.target === item);
               if (!evidence || !evidence.summary || evidence.strength === undefined || !evidence.citation) {
                 missingEvidence.push(item);
               }
@@ -549,24 +563,52 @@ text: JSON.stringify({
 
             const allEvidenceComplete = missingEvidence.length === 0;
 
+            // Analyze conflicts - tool detects contradictory evidence
+            const contradictoryEvidence = evidence_items.filter(item => item.strength < 0);
+
+            // Only succeed if ALL evidence complete AND no major conflicts unaddressed
+            const hasConflicts = contradictoryEvidence.length > 0;
+            const finalSuccess = allEvidenceComplete && !hasConflicts;
+
             return {
               content: [{
                 type: "text",
                 text: JSON.stringify({
-                  evidence_gathering_result: {
-                    success: allEvidenceComplete,
-                    status: allEvidenceComplete ?
-                      "✅ SUCCESS - All atoms and implications have complete evidence" :
-                      `🚫 FAILURE - ${missingEvidence.length} items missing evidence`,
-                    required_items: allRequiredItems.length,
-                    provided_items: allRequiredItems.length - missingEvidence.length,
-                    missing_evidence: missingEvidence.length > 0 ? missingEvidence.map(item => ({
-                      item: item,
-                      instruction: `MUST provide evidence for: "${item}". Format in context: "${item}: summary=your evidence text, strength=0.0-1.0, citation=your source"`
-                    })) : [],
-                    next_step: allEvidenceComplete ?
-                      "Evidence gathering complete - argument validated with evidence" :
-                      `EXACTLY what to do: Call evidence_gathering again with context parameter containing evidence for: ${missingEvidence.join(", ")}`
+                  evidence_analysis: {
+                    success: finalSuccess,
+                    evidence_completeness: {
+                      status: allEvidenceComplete ? "COMPLETE" : "INCOMPLETE",
+                      required_items: allRequiredItems.length,
+                      provided_items: allRequiredItems.length - missingEvidence.length,
+                      missing_items: missingEvidence
+                    },
+                    conflict_analysis: {
+                      contradictory_evidence_detected: hasConflicts,
+                      contradictory_items: contradictoryEvidence.map(item => ({
+                        target: item.target,
+                        summary: item.summary,
+                        strength: item.strength,
+                        citation: item.citation
+                      })),
+                      conflict_count: contradictoryEvidence.length
+                    },
+                    requirements_for_self_analysis: {
+                      must_answer: [
+                        "Did you find any evidence that contradicts your claims? (YES/NO)",
+                        "Should you revise your argument based on the evidence? (YES/NO)",
+                        hasConflicts ? "You have contradictory evidence - explain why you should proceed or how you will revise" : "Justify proceeding with this argument"
+                      ],
+                      decision_required: hasConflicts ?
+                        "🚨 CONFLICTS DETECTED: You must either revise your argument or explicitly justify proceeding despite contradictory evidence" :
+                        allEvidenceComplete ?
+                          "Evidence complete - proceed or revise based on your analysis" :
+                          "Provide missing evidence before proceeding"
+                    },
+                    next_steps: allEvidenceComplete ?
+                      (hasConflicts ?
+                        ["1. Analyze the contradictory evidence above", "2. Decide: revise argument OR justify proceeding", "3. If revising: use rlmcp_reason with updated argument", "4. If proceeding: explain your reasoning"] :
+                        ["Evidence complete and no major conflicts detected", "Argument ready for use"]) :
+                      ["1. Provide evidence for missing items", "2. Re-run evidence_gathering with complete evidence"]
                   },
                   original_rlmcp_analysis: analysis
                 }, null, 2)
