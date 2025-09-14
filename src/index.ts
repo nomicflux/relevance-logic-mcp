@@ -295,7 +295,7 @@ text: JSON.stringify({
                       premises: structured.premises.map(p => p.originalText),
                       conclusion: structured.conclusion.originalText
                     },
-                    validation_results: { overallValid: validation.validation_results.overallValid },
+                    validation_results: validation.validation_results,
                     gap_analysis: gapAnalysis,
                     guidance: guidance,
                     next_steps: validation.validation_results.overallValid ? 
