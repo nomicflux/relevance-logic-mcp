@@ -39,10 +39,10 @@ Classical logic allows inferences like:
 
 ## 3. Major Logical Systems
 
-### System R (Relevant Implication)
-- One of the most prominent relevance logic systems
-- Maintains basic logical principles while enforcing variable sharing
-- Balances logical strength with relevance requirements
+### Relevant Implication Systems
+- Prominent relevance logic systems
+- Maintain basic logical principles while enforcing variable sharing
+- Balance logical strength with relevance requirements
 
 ### System E (Relevant Entailment)
 - Stronger system with additional constraints
@@ -61,8 +61,8 @@ Classical logic allows inferences like:
 
 ## 4. Semantic Approaches
 
-### Ternary Relation Semantics
-- Uses **three-place relation** on possible worlds to evaluate logical implications
+### Relation Semantics
+- Uses relations on possible worlds to evaluate logical implications
 - More sophisticated than binary relations in modal logic
 - Allows nuanced truth conditions that respect relevance constraints
 
@@ -147,7 +147,7 @@ Classical logic allows inferences like:
 - **Bridges formal logic** and natural language inference patterns
 
 ### Methodological Innovations
-- **Ternary semantics** offer new tools for logical analysis
+- **Relation semantics** offer new tools for logical analysis
 - **Variable sharing** principle influences other non-classical logics
 - **Content sensitivity** becomes important criterion for logical systems
 

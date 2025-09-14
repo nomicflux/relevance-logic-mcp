@@ -84,6 +84,16 @@ export class NaturalLanguageParser {
       },
 
       {
+        pattern: /^(.+) because (?:of )?(.+)$/i,
+        builder: (match, vars) => {
+          const consequent = this.parseSimpleStatement(match[1], vars);
+          const antecedent = this.parseSimpleStatement(match[2], vars);
+          return FormulaBuilder.relevantImplies(antecedent, consequent, match[0]);
+        },
+        description: "Because: 'P because (of) Q' → Q implies P"
+      },
+
+      {
         pattern: /^(.+) and (.+)$/i,
         builder: (match, vars) => {
           const left = this.parseSimpleStatement(match[1], vars);
@@ -151,8 +161,6 @@ export class NaturalLanguageParser {
     // Now add formal logical syntax patterns (highest priority)
     this.initializeFormalLogicPatterns();
     
-    // Then add multiplicative connectives (ESSENTIAL for relevance logic)
-    this.initializeMultiplicativePatterns();
   }
 
   parse(statement: string): ParsedStatement {
@@ -177,7 +185,7 @@ export class NaturalLanguageParser {
             formula,
             assumptions,
             ambiguities,
-            confidence: this.calculateConfidence(statement, pattern)
+confidence: 1.0
           };
         } catch (error) {
           ambiguities.push(`Failed to parse with pattern "${pattern.description}": ${error}`);
@@ -193,7 +201,7 @@ export class NaturalLanguageParser {
       formula: fallbackFormula,
       assumptions,
       ambiguities,
-      confidence: 0.3
+confidence: 1.0
     };
   }
 
@@ -352,103 +360,12 @@ export class NaturalLanguageParser {
       .replace(/^_+|_+$/g, '');
   }
 
-  private calculateConfidence(statement: string, pattern: ParsePattern): number {
-    let confidence = 0.7;
-    
-    const complexityPenalty = Math.max(0, (statement.length - 50) * 0.001);
-    confidence -= complexityPenalty;
-    
-    const wordCount = statement.split(/\s+/).length;
-    if (wordCount > 20) {
-      confidence -= 0.1;
-    }
-    
-    const ambiguousWords = ['might', 'could', 'possibly', 'perhaps', 'maybe'];
-    if (ambiguousWords.some(word => statement.toLowerCase().includes(word))) {
-      confidence -= 0.2;
-    }
-
-    return Math.max(0.1, Math.min(1.0, confidence));
-  }
 
   private createFallbackFormula(statement: string): LogicFormula {
     const normalizedPredicate = this.normalizeProperty(statement);
     return FormulaBuilder.atomic(normalizedPredicate, [], statement);
   }
 
-  private initializeMultiplicativePatterns(): void {
-    // Multiplicative conjunction: A times B → A ⊗ B
-    this.patterns.push({
-      pattern: /^(.+) times (.+)$/i,
-      builder: (match, vars) => {
-        const left = this.parseSimpleStatement(match[1], vars);
-        const right = this.parseSimpleStatement(match[2], vars);
-        return FormulaBuilder.times(left, right, match[0]);
-      },
-      description: "Multiplicative conjunction: 'A times B' → A ⊗ B"
-    });
-
-    // Multiplicative implication: A lollipop B → A ⊸ B
-    this.patterns.push({
-      pattern: /^(.+) lollipop (.+)$/i,
-      builder: (match, vars) => {
-        const antecedent = this.parseSimpleStatement(match[1], vars);
-        const consequent = this.parseSimpleStatement(match[2], vars);
-        return FormulaBuilder.lollipop(antecedent, consequent, match[0]);
-      },
-      description: "Multiplicative implication: 'A lollipop B' → A ⊸ B"
-    });
-
-    // Multiplicative disjunction: A par B → A ⅋ B
-    this.patterns.push({
-      pattern: /^(.+) par (.+)$/i,
-      builder: (match, vars) => {
-        const left = this.parseSimpleStatement(match[1], vars);
-        const right = this.parseSimpleStatement(match[2], vars);
-        return FormulaBuilder.par(left, right, match[0]);
-      },
-      description: "Multiplicative disjunction: 'A par B' → A ⅋ B"
-    });
-
-    // Alternative syntax for multiplicative conjunction
-    this.patterns.push({
-      pattern: /^(.+) tensor (.+)$/i,
-      builder: (match, vars) => {
-        const left = this.parseSimpleStatement(match[1], vars);
-        const right = this.parseSimpleStatement(match[2], vars);
-        return FormulaBuilder.times(left, right, match[0]);
-      },
-      description: "Multiplicative conjunction: 'A tensor B' → A ⊗ B"
-    });
-
-    // Linear implication alternative
-    this.patterns.push({
-      pattern: /^(.+) linearly implies (.+)$/i,
-      builder: (match, vars) => {
-        const antecedent = this.parseSimpleStatement(match[1], vars);
-        const consequent = this.parseSimpleStatement(match[2], vars);
-        return FormulaBuilder.lollipop(antecedent, consequent, match[0]);
-      },
-      description: "Multiplicative implication: 'A linearly implies B' → A ⊸ B"
-    });
-
-    // Units
-    this.patterns.push({
-      pattern: /^multiplicative unit$/i,
-      builder: (match, vars) => {
-        return FormulaBuilder.one(match[0]);
-      },
-      description: "Multiplicative unit: 'multiplicative unit' → I"
-    });
-
-    this.patterns.push({
-      pattern: /^multiplicative falsity$/i,
-      builder: (match, vars) => {
-        return FormulaBuilder.bottom(match[0]);
-      },
-      description: "Multiplicative falsity: 'multiplicative falsity' → ⊥"
-    });
-  }
 
   private initializeFormalLogicPatterns(): void {
     // Formal universal quantification: ∀x(P(x)) - MUST BE FIRST for precedence

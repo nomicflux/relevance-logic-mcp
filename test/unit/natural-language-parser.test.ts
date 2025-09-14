@@ -30,11 +30,43 @@ describe('NaturalLanguageParser - Unit Tests', () => {
 
     test('parses atomic predicate P(a)', () => {
       const result = parser.parse('P(a)');
-      
+
       expect(result.formula.type).toBe('atomic');
       expect(result.formula.predicate).toBe('P');
       expect(result.formula.terms).toHaveLength(1);
       expect(result.formula.terms![0].name).toBe('a');
+    });
+
+    test('parses because statement: "P because Q" → Q implies P', () => {
+      const result = parser.parse('it rains because clouds are heavy');
+
+      expect(result.formula.type).toBe('compound');
+      expect(result.formula.operator).toBe('implies');
+      expect(result.formula.subformulas).toHaveLength(2);
+
+      // Antecedent should be "clouds are heavy"
+      const antecedent = result.formula.subformulas![0];
+      expect(antecedent.naturalLanguage).toContain('clouds are heavy');
+
+      // Consequent should be "it rains"
+      const consequent = result.formula.subformulas![1];
+      expect(consequent.naturalLanguage).toContain('it rains');
+    });
+
+    test('parses because of statement: "P because of Q" → Q implies P', () => {
+      const result = parser.parse('the plant grows because of sunlight');
+
+      expect(result.formula.type).toBe('compound');
+      expect(result.formula.operator).toBe('implies');
+      expect(result.formula.subformulas).toHaveLength(2);
+
+      // Antecedent should be "sunlight"
+      const antecedent = result.formula.subformulas![0];
+      expect(antecedent.naturalLanguage).toContain('sunlight');
+
+      // Consequent should be "the plant grows"
+      const consequent = result.formula.subformulas![1];
+      expect(consequent.naturalLanguage).toContain('the plant grows');
     });
   });
 

@@ -12,7 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { NaturalLanguageParser } from "./parser/nlp-parser.js";
 import { FormulaUtils } from "./logic/formula.js";
-import { LogicFormula, SystemRValidation } from "./types.js";
+import { LogicFormula, ValidationResult } from "./types.js";
 import { EvidenceModule } from "./evidence/evidence-module.js";
 
 class RelevanceLogicServer {
@@ -270,14 +270,14 @@ text: JSON.stringify({
           
           // Step 4: If invalid, diagnose gaps
           let gapAnalysis = null;
-          if (!validation.validation.overallValid) {
+          if (!validation.validation_results.overallValid) {
             gapAnalysis = this.diagnoseLogicalGaps(task);
           }
           
-          const logicalStatus = validation.validation.overallValid ? "valid" : "invalid";
+          const logicalStatus = validation.validation_results.overallValid ? "valid" : "invalid";
 
-          const isCircular = validation.validation.failures.some((f: string) => f.includes('CIRCULAR REASONING'));
-          const guidance = validation.validation.overallValid ? 
+          const isCircular = validation.validation_results.failures.some((f: { constraint_violated: string }) => f.constraint_violated.includes('CIRCULAR REASONING'));
+          const guidance = validation.validation_results.overallValid ? 
             "✅ Valid - ready for use" :
             isCircular ? 
               "❌ CIRCULAR REASONING - you're not being explicit about your intuitions and domain knowledge. Make implicit assumptions into explicit premises." :
@@ -292,18 +292,17 @@ text: JSON.stringify({
                     original_task: task,
                     formalization_guidance: formalized,
                     structured_argument: {
-                      premises: structured.premises.length,
-                      conclusion: structured.conclusion.originalText,
-                      logical_structure: logicalStatus
+                      premises: structured.premises.map(p => p.originalText),
+                      conclusion: structured.conclusion.originalText
                     },
-                    validation_results: { overallValid: validation.validation.overallValid },
+                    validation_results: { overallValid: validation.validation_results.overallValid },
                     gap_analysis: gapAnalysis,
                     guidance: guidance,
-                    next_steps: validation.validation.overallValid ? 
+                    next_steps: validation.validation_results.overallValid ? 
                       ["✅ Use evidence_gathering if evidence needed"] :
                       this.generateSpecificNextSteps(gapAnalysis, structured),
                     recommendations: gapAnalysis?.recommendations || [
-                      "All premises properly connect to conclusion through exact syntactic sharing"
+                      "All premises are in the same connected component as the conclusion"
                     ]
                   }
                 }, null, 2)
@@ -326,8 +325,6 @@ text: JSON.stringify({
                   symbolic: FormulaUtils.toString(parsed.formula),
                   variables: Array.from(parsed.formula.variables),
                   predicates: Array.from(parsed.formula.predicates),
-                  atomicFormulas: FormulaUtils.extractAtomicFormulas(parsed.formula).map(a => FormulaUtils.toString(a)),
-                  confidence: parsed.confidence,
                   ambiguities: parsed.ambiguities,
                   supportedPatterns: this.parser.getSupportedPatterns()
                 }, null, 2),
@@ -371,19 +368,19 @@ text: JSON.stringify({
           
           // If invalid, automatically include detailed gap analysis
           let gapAnalysis = null;
-          if (!validation.validation.overallValid) {
+          if (!validation.validation_results.overallValid) {
             gapAnalysis = this.diagnoseLogicalGaps(argument);
             (validation as any).automaticGapAnalysis = gapAnalysis;
           }
           
           const enhancedValidation = {
             ...validation,
-            guidance: validation.validation.overallValid ?
+            guidance: validation.validation_results.overallValid ?
               "✅ Valid" :
-              validation.validation.failures.some((f: string) => f.includes('CIRCULAR REASONING')) ?
+              validation.validation_results.failures.some((f: { constraint_violated: string }) => f.constraint_violated.includes('CIRCULAR REASONING')) ?
                 "❌ Circular reasoning - make implicit assumptions explicit" :
                 "❌ Invalid - fix logical structure. Use rlmcp_help if needed.",
-            next_steps: validation.validation.overallValid ?
+            next_steps: validation.validation_results.overallValid ?
               ["✅ Valid and ready"] :
               this.generateSpecificNextSteps(gapAnalysis, this.parser.parseArgument(argument))
           };
@@ -404,13 +401,12 @@ text: JSON.stringify({
           const parsedPremises = premises.map(p => this.parser.parse(p).formula);
           const parsedConclusion = this.parser.parse(conclusion).formula;
           
-          const sharingAnalysis = this.analyzeSyntacticSharing(parsedPremises, parsedConclusion);
-          
+          // Sharing analysis removed - only connected/disconnected matters
           return {
             content: [
               {
                 type: "text",
-                text: JSON.stringify(sharingAnalysis, null, 2),
+                text: JSON.stringify({ message: "Sharing analysis removed - only connected/disconnected validation remains" }, null, 2),
               },
             ],
           };
@@ -422,7 +418,6 @@ text: JSON.stringify({
           const structuredAnalysis = this.structureArgument(argument, context);
           
           // Check if the structured argument has potential issues and provide specific guidance
-          const hasRelevanceIssues = !structuredAnalysis.relevancePreCheck?.hasAtomicSharing;
           const structuralIssues = structuredAnalysis.relevancePreCheck?.potentialIssues || [];
           
           // Add atomic formula examples and specific next steps
@@ -431,10 +426,10 @@ text: JSON.stringify({
             examples: [
               "mammal(dolphin)", "warm_blooded(x)", "larger(elephant,mouse)"
             ],
-            guidance: hasRelevanceIssues ?
+            guidance: structuralIssues.length > 0 ?
               "⚠️ Potential issues - review below" :
               "✅ Structure looks good",
-            next_steps: hasRelevanceIssues ?
+            next_steps: structuralIssues.length > 0 ?
               this.generateStructuralNextSteps(structuralIssues, structuredAnalysis) :
               ["Run rlmcp_reason to validate"]
           };
@@ -868,7 +863,7 @@ This ensures all your responses are grounded in rigorous logical reasoning.`
 
 AUTOMATICALLY apply these relevance logic tools:
 1. structure_argument - Convert this reasoning to formal logical structure
-2. validate_argument - Check for exact syntactic sharing and logical validity
+2. validate_argument - Check for connected components and logical validity
 3. diagnose_gaps - If invalid, identify what's missing
 4. formalize_reasoning - Strengthen weak connections
 
@@ -886,57 +881,38 @@ Do this validation transparently, then present the improved reasoning.`
   }
 
   private strictValidation(premises: LogicFormula[], conclusion: LogicFormula) {
-    // SYSTEM R TERNARY RELATION VALIDATION - This is the CORRECT implementation
-    const systemRValidation = FormulaUtils.validateSystemR(premises, conclusion);
-    
-    // Extract detailed sharing analysis
-    const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
-    const premiseDetails = premises.map((premise, index) => {
-      const premiseAtoms = FormulaUtils.extractAtomicFormulas(premise);
-      const sharedAtoms = FormulaUtils.getSharedAtomicFormulas(premise, conclusion);
-      const hasSharing = FormulaUtils.hasExactAtomicSharing(premise, conclusion);
-      
-      return {
-        index: index + 1,
-        formula: FormulaUtils.toString(premise),
-        atomicFormulas: premiseAtoms.map(a => FormulaUtils.toString(a)),
-        sharedWithConclusion: sharedAtoms.map(a => FormulaUtils.toString(a)),
-        hasValidSharing: hasSharing
-      };
-    });
-    
+    // VALIDATION - Connected/Disconnected check only
+    const validation = FormulaUtils.validate(premises, conclusion);
+
     const analysis = {
       version: "2.0.0 - LOGICAL VALIDATION",
       argument: {
         premises: premises.map(p => FormulaUtils.toString(p)),
         conclusion: FormulaUtils.toString(conclusion)
       },
-      validation: {
-        overallValid: systemRValidation.isValid,
-        failures: systemRValidation.isValid ? [] : systemRValidation.violatedConstraints,
-        detailedAnalysis: {
-          conclusionAtomicFormulas: conclusionAtoms.map(a => FormulaUtils.toString(a)),
-          premiseAnalysis: premiseDetails,
-          failingPremises: premiseDetails.filter(p => !p.hasValidSharing).map(p => ({
-            premise: p.index,
-            formula: p.formula,
-            issue: "No atomic formulas shared with conclusion",
-            missing: conclusionAtoms.map(a => FormulaUtils.toString(a)).filter(atom => 
-              !p.atomicFormulas.includes(atom)
-            )
-          }))
-        }
+      validation_results: {
+        overallValid: validation.isValid,
+        failures: validation.isValid ? [] : validation.violatedConstraints.map(constraint => ({
+          check_name: this.getCheckName(constraint),
+          constraint_violated: constraint,
+          specific_inputs: {
+            premises: premises.map(p => FormulaUtils.toString(p)),
+            conclusion: FormulaUtils.toString(conclusion),
+            failed_premise_indices: this.extractFailedPremiseIndices(constraint)
+          },
+          explanation: this.getFailureExplanation(constraint)
+        }))
       },
       errors: [] as string[],
       warnings: [] as string[],
     };
 
     // Add errors for logical validation failures with specific guidance
-    if (!systemRValidation.isValid) {
-      analysis.errors.push("LOGICAL VALIDATION FAILED: Argument has disconnected parts");
+    if (!validation.isValid) {
+      analysis.errors.push("LOGICAL VALIDATION FAILED");
 
       // Parse the specific constraint violations to give targeted guidance
-      systemRValidation.violatedConstraints.forEach(constraint => {
+      validation.violatedConstraints.forEach(constraint => {
         analysis.errors.push(constraint);
 
         // Provide specific guidance based on the type of violation
@@ -946,44 +922,50 @@ Do this validation transparently, then present the improved reasoning.`
           if (premiseMatches) {
             const disconnectedPremises = premiseMatches[1].split(', P').map(p => p.replace('P', ''));
             analysis.errors.push(`SPECIFIC ISSUE: Premise${disconnectedPremises.length > 1 ? 's' : ''} ${disconnectedPremises.join(', ')} not connected to conclusion`);
-            analysis.errors.push("TO FIX: Add logical bridges connecting these premises to the conclusion");
+            analysis.errors.push("TO FIX: Remove disconnected premises");
           }
         } else if (constraint.includes('CIRCULAR REASONING:')) {
           analysis.errors.push("TO FIX: Replace circular premise with explicit supporting premises");
-        } else if (constraint.includes('quantifier')) {
-          analysis.errors.push("TO FIX: Ensure quantifier variables are properly bound and shared");
         }
       });
 
-      analysis.warnings.push("Logical validation requires all premises to be connected to the conclusion through shared content");
+      analysis.warnings.push("Logical validation requires all premises to be in the same connected component as the conclusion");
     }
 
     return analysis;
   }
 
-
-  private analyzeSyntacticSharing(premises: LogicFormula[], conclusion: LogicFormula) {
-    const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
-    
-    const analysis = {
-      conclusionAtomicFormulas: conclusionAtoms.map(a => FormulaUtils.toString(a)),
-      premiseAnalysis: premises.map((premise, idx) => {
-        const premiseAtoms = FormulaUtils.extractAtomicFormulas(premise);
-        const sharedAtoms = FormulaUtils.getSharedAtomicFormulas(premise, conclusion);
-        
-        return {
-          premiseIndex: idx,
-          premise: FormulaUtils.toString(premise),
-          atomicFormulas: premiseAtoms.map(a => FormulaUtils.toString(a)),
-          sharedAtomicFormulas: sharedAtoms.map(a => FormulaUtils.toString(a)),
-          hasExactSharing: sharedAtoms.length > 0,
-        };
-      }),
-      overallSharing: premises.some(premise => FormulaUtils.hasExactAtomicSharing(premise, conclusion))
-    };
-
-    return analysis;
+  private getCheckName(constraint: string): string {
+    if (constraint.includes('DISCONNECTED:')) return 'connected_components_check';
+    if (constraint.includes('CIRCULAR REASONING:')) return 'circular_reasoning_check';
+    if (constraint.includes('quantifier')) return 'quantifier_scope_check';
+    if (constraint.includes('Distribution')) return 'distribution_compliance_check';
+    if (constraint.includes('Multiplicative')) return 'multiplicative_logic_check';
+    return 'unknown_check';
   }
+
+  private extractFailedPremiseIndices(constraint: string): number[] {
+    const premiseMatches = constraint.match(/P(\d+(?:, P\d+)*)/);
+    if (premiseMatches) {
+      return premiseMatches[1].split(', P').map(p => parseInt(p.replace('P', '')));
+    }
+    return [];
+  }
+
+  private getFailureExplanation(constraint: string): string {
+    if (constraint.includes('DISCONNECTED:')) {
+      return 'These premises are in a disconnected component from the conclusion and must be removed';
+    }
+    if (constraint.includes('CIRCULAR REASONING:')) {
+      return 'Premise is identical to or contains the conclusion, making the argument circular';
+    }
+    if (constraint.includes('quantifier')) {
+      return 'Quantifier variable binding is incompatible between premise and conclusion';
+    }
+    return constraint;
+  }
+
+
 
 
 
@@ -1004,14 +986,10 @@ Do this validation transparently, then present the improved reasoning.`
           index: i + 1,
           originalText: p.originalText,
           logicalForm: FormulaUtils.toString(p.formula),
-          atomicFormulas: FormulaUtils.extractAtomicFormulas(p.formula).map(a => FormulaUtils.toString(a)),
-          confidence: p.confidence
         })),
         conclusion: {
           originalText: parsedArg.conclusion.originalText,
           logicalForm: FormulaUtils.toString(conclusion),
-          atomicFormulas: FormulaUtils.extractAtomicFormulas(conclusion).map(a => FormulaUtils.toString(a)),
-          confidence: parsedArg.conclusion.confidence
         }
       },
       structuralAnalysis: {
@@ -1020,8 +998,6 @@ Do this validation transparently, then present the improved reasoning.`
         variableUsage: this.analyzeVariables(premises, conclusion)
       },
       relevancePreCheck: {
-        hasAtomicSharing: premises.some(p => FormulaUtils.hasExactAtomicSharing(p, conclusion)),
-        sharingDetails: this.analyzeSyntacticSharing(premises, conclusion),
         potentialIssues: this.identifyStructuralIssues(premises, conclusion)
       },
       recommendations: this.generateStructuralRecommendations(parsedArg, context)
@@ -1094,34 +1070,21 @@ Do this validation transparently, then present the improved reasoning.`
 
   private identifyStructuralIssues(premises: LogicFormula[], conclusion: LogicFormula): string[] {
     const issues: string[] = [];
-    
-    // Check for completely disconnected terms
-    const premiseAtoms = premises.flatMap(p => FormulaUtils.extractAtomicFormulas(p));
-    const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
-    
-    const hasAnyAtomicSharing = premiseAtoms.some(pAtom => 
-      conclusionAtoms.some(cAtom => FormulaUtils.atomicFormulasIdentical(pAtom, cAtom))
-    );
-    
-    if (!hasAnyAtomicSharing) {
-      issues.push("No atomic connections between premises and conclusion - may indicate disconnected argument parts");
-    }
-    
+
     // Check for complex nested structures that might need clarification
     const hasComplexNesting = [...premises, conclusion].some(f => FormulaUtils.complexity(f) > 5);
     if (hasComplexNesting) {
       issues.push("Complex nested logical structure - consider breaking into simpler steps");
     }
-    
+
     return issues;
   }
 
   private generateStructuralRecommendations(parsedArg: any, context: string): string[] {
     return [
-      "1. Share atomic formulas between premises and conclusion",
-      "2. Use quantifiers (∀, ∃) for general statements", 
-      "3. Make variable bindings explicit",
-      "4. Remove irrelevant premises"
+      "1. Use quantifiers (∀, ∃) for general statements",
+      "2. Make variable bindings explicit",
+      "3. Remove irrelevant premises"
     ];
   }
 
@@ -1165,20 +1128,16 @@ Do this validation transparently, then present the improved reasoning.`
   private analyzeSyntacticGaps(premises: LogicFormula[], conclusion: LogicFormula) {
     const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
     const premiseAtoms = premises.flatMap(p => FormulaUtils.extractAtomicFormulas(p));
-    
-    const unsharedAtoms = conclusionAtoms.filter(cAtom => 
-      !premiseAtoms.some(pAtom => FormulaUtils.atomicFormulasIdentical(cAtom, pAtom))
-    );
 
     const sharedPredicates = new Set<string>();
     const unsharedPredicates = new Set<string>();
-    
+
     conclusionAtoms.forEach(cAtom => {
-      const hasExactSharing = premiseAtoms.some(pAtom => 
-        FormulaUtils.atomicFormulasIdentical(pAtom, cAtom)
+      const hasPredicateSharing = premiseAtoms.some(pAtom =>
+        pAtom.predicate === cAtom.predicate
       );
-      
-      if (hasExactSharing) {
+
+      if (hasPredicateSharing) {
         sharedPredicates.add(cAtom.predicate!);
       } else {
         unsharedPredicates.add(cAtom.predicate!);
@@ -1186,12 +1145,8 @@ Do this validation transparently, then present the improved reasoning.`
     });
 
     return {
-      hasExactSyntacticSharing: premises.some(p => FormulaUtils.hasExactAtomicSharing(p, conclusion)),
-      unsharedAtomicFormulas: unsharedAtoms.map(a => FormulaUtils.toString(a)),
       sharedPredicates: Array.from(sharedPredicates),
-      unsharedPredicates: Array.from(unsharedPredicates),
-      severityLevel: unsharedPredicates.size > 0 ? "CRITICAL" : 
-                   unsharedAtoms.length > 0 ? "MODERATE" : "NONE"
+      unsharedPredicates: Array.from(unsharedPredicates)
     };
   }
 
@@ -1203,8 +1158,8 @@ Do this validation transparently, then present the improved reasoning.`
 
     // Check for atomic formulas that appear in conclusion but not exactly in premises
     conclusionAtoms.forEach(cAtom => {
-      const hasExactMatch = premiseAtoms.some(pAtom => 
-        FormulaUtils.atomicFormulasIdentical(pAtom, cAtom)
+      const hasExactMatch = premiseAtoms.some(pAtom =>
+        pAtom.predicate === cAtom.predicate
       );
       
       if (!hasExactMatch) {
@@ -1231,9 +1186,7 @@ Do this validation transparently, then present the improved reasoning.`
 
     return {
       missingBridges: bridges,
-      bridgeCount: bridges.length,
-      criticalityLevel: bridges.some(b => b.type === "MISSING_ATOMIC_FORMULA") ? "HIGH" : 
-                       bridges.length > 0 ? "MEDIUM" : "LOW"
+      bridgeCount: bridges.length
     };
   }
 
@@ -1294,8 +1247,7 @@ Do this validation transparently, then present the improved reasoning.`
 
     return {
       missingPremises: missing,
-      totalMissing: missing.length,
-      severity: missing.length === 0 ? "NONE" : missing.length < 3 ? "MODERATE" : "HIGH"
+      totalMissing: missing.length
     };
   }
 
@@ -1321,8 +1273,7 @@ Do this validation transparently, then present the improved reasoning.`
 
     return {
       quantifierIssues: issues,
-      issueCount: issues.length,
-      severity: issues.length > 0 ? "MEDIUM" : "NONE"
+      issueCount: issues.length
     };
   }
 
@@ -1333,11 +1284,8 @@ Do this validation transparently, then present the improved reasoning.`
     if (premises.length === 0) {
       issues.push("No premises provided - conclusion cannot be derived");
     }
-    
-    if (premises.length === 1 && !FormulaUtils.hasExactAtomicSharing(premises[0], conclusion)) {
-      issues.push("Single premise does not share content with conclusion");
-    }
-    
+
+
     // Check for circular reasoning
     premises.forEach((premise, idx) => {
       if (FormulaUtils.toString(premise) === FormulaUtils.toString(conclusion)) {
@@ -1346,8 +1294,7 @@ Do this validation transparently, then present the improved reasoning.`
     });
 
     return {
-      structuralIssues: issues,
-      severity: issues.length > 0 ? "HIGH" : "NONE"
+      structuralIssues: issues
     };
   }
 
@@ -1355,26 +1302,9 @@ Do this validation transparently, then present the improved reasoning.`
   private generateGapRepairRecommendations(premises: LogicFormula[], conclusion: LogicFormula): string[] {
     const recommendations: string[] = [];
     
-    const hasSharing = premises.some(p => FormulaUtils.hasExactAtomicSharing(p, conclusion));
+    // Connected component check is handled by validation - no additional recommendations needed
     
-    if (!hasSharing) {
-      recommendations.push("Add premises sharing atomic formulas with conclusion");
-    }
-    
-    const conclusionAtoms = FormulaUtils.extractAtomicFormulas(conclusion);
-    const premiseAtoms = premises.flatMap(p => FormulaUtils.extractAtomicFormulas(p));
-    
-    conclusionAtoms.forEach(cAtom => {
-      const hasMatch = premiseAtoms.some(pAtom => 
-        FormulaUtils.atomicFormulasIdentical(pAtom, cAtom)
-      );
-      
-      if (!hasMatch) {
-        recommendations.push(`Add: ${FormulaUtils.toString(cAtom)}`);
-      }
-    });
-    
-    recommendations.push("Use exact variable identity");
+    // All recommendations are now handled by connected component validation
     
     return recommendations;
   }
@@ -1393,7 +1323,6 @@ Do this validation transparently, then present the improved reasoning.`
           index: i + 1,
           naturalLanguage: p.originalText,
           currentLogicalForm: FormulaUtils.toString(p.formula),
-          atomicFormulas: FormulaUtils.extractAtomicFormulas(p.formula).map(a => FormulaUtils.toString(a)),
           issues: this.identifyFormalizationIssues(p.formula, p.originalText)
         })),
         conclusion: {
@@ -1555,8 +1484,8 @@ Do this validation transparently, then present the improved reasoning.`
         "Ensure each premise contains predicates that will appear in conclusion",
         "Make causal relationships explicit with proper logical connectives"
       ],
-      improvedConclusion: targetConclusion || "Reformulated to share predicates with premises",
-      explanation: "Proper formalization requires atomic predicates, explicit logical relationships, and syntactic sharing"
+      improvedConclusion: targetConclusion || "Reformulated for connected components",
+      explanation: "Proper formalization requires atomic predicates and explicit logical relationships"
     };
   }
 
@@ -1569,17 +1498,8 @@ Do this validation transparently, then present the improved reasoning.`
       });
     }
     
-    const sharingDetails = structuredAnalysis.relevancePreCheck?.sharingDetails;
-    if (sharingDetails) {
-      const premisesWithoutSharing = sharingDetails.premiseAnalysis?.filter((p: any) => !p.hasExactSharing) || [];
-      
-      if (premisesWithoutSharing.length > 0) {
-        steps.push("No sharing:");
-        premisesWithoutSharing.slice(0,2).forEach((premise: any) => {
-          steps.push(`P${premise.premiseIndex + 1}: needs connection to conclusion`);
-        });
-        steps.push("Fix: Include conclusion's atomic formulas in premises");
-      }
+    // Skip sharing details - only connected components matter now
+    if (false) {
     }
     
     steps.push("Next: Run validate_argument");
@@ -1617,7 +1537,7 @@ Do this validation transparently, then present the improved reasoning.`
       }
       
       if (steps.length === 1) {
-        steps.push("No sharing between premises and conclusion");
+        steps.push("Premises disconnected from conclusion");
         steps.push("Fix: Use same atomic formulas in premises and conclusion");
       }
     } else {
