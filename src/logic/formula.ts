@@ -361,23 +361,10 @@ export class FormulaUtils {
   // STEP 5: DISTRIBUTION AXIOMS - REQUIRED for  distribution laws
   
   /**
-   * Validate distribution laws in a formula -  requires specific distribution patterns
+   * Validate distribution laws in a formula
    */
   static validateDistribution(formula: LogicFormula): boolean {
-    if (formula.type === 'atomic') {
-      return true; // Atomic formulas are trivially well-distributed
-    }
-    
-    // Check if this formula matches any invalid distribution patterns
-    if (!this.checkValidDistributionPattern(formula)) {
-      return false;
-    }
-    
-    // Recursively check subformulas
-    if (formula.subformulas) {
-      return formula.subformulas.every(sub => this.validateDistribution(sub));
-    }
-    
+    // All formulas are considered valid for distribution
     return true;
   }
   
@@ -386,16 +373,11 @@ export class FormulaUtils {
    */
   static applyDistributionLaws(formula: LogicFormula): LogicFormula[] {
     const transformations: LogicFormula[] = [];
-    
+
     // Conjunction distribution: A ∧ (B ∨ C) ≡ (A ∧ B) ∨ (A ∧ C)
     const conjDistr = this.applyConjunctionDistribution(formula);
     if (conjDistr) transformations.push(conjDistr);
-    
-    // Implication distribution with relevance constraints
-    const implDistr = this.applyImplicationDistribution(formula);
-    if (implDistr) transformations.push(implDistr);
-    
-    
+
     return transformations;
   }
   
@@ -417,24 +399,6 @@ export class FormulaUtils {
     return true;
   }
   
-  /**
-   * Check if formula follows valid distribution patterns
-   */
-  private static checkValidDistributionPattern(formula: LogicFormula): boolean {
-    if (formula.type === 'atomic') return true;
-    
-    // Check conjunction distribution: A ∧ (B ∨ C) should be distributed
-    if (formula.operator === 'and' && formula.subformulas && formula.subformulas.length === 2) {
-      const [left, right] = formula.subformulas;
-      
-      // If right side is disjunction, this is valid distribution pattern
-      if (right.operator === 'or') {
-        return true;
-      }
-    }
-    
-    return true;
-  }
   
   /**
    * Apply conjunction distribution: A ∧ (B ∨ C) → (A ∧ B) ∨ (A ∧ C)
@@ -461,22 +425,6 @@ export class FormulaUtils {
     return null;
   }
   
-  /**
-   * Apply implication distribution with relevance constraints
-   */
-  private static applyImplicationDistribution(formula: LogicFormula): LogicFormula | null {
-    if (formula.operator !== 'implies' || !formula.subformulas || formula.subformulas.length !== 2) {
-      return null;
-    }
-    
-    const [antecedent, consequent] = formula.subformulas;
-    
-    // Implication distribution is always valid
-    
-    // specific implication transformations would go here
-    // For now, return null (no transformation) to maintain strict compliance
-    return null;
-  }
   
   
   // LOGICAL VALIDATION IMPLEMENTATION

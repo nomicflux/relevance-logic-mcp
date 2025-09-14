@@ -200,29 +200,34 @@ class RelevanceLogicServer {
           },
           {
             name: "dig_in",
-            description: "[USER-INITIATED ONLY] Expand specific evidence into sub-arguments. User must explicitly request and specify target requirement.",
+            description: "[USER-INITIATED ONLY] When user says 'dig in to [atom/implication]': take the evidence already provided for that atom/implication as the new premise, take the atom/implication as the new conclusion, build valid logical chain between them. Example: If evidence 'Studies show correlation' was provided for atom 'smoking causes cancer', this creates sub-argument: P1: 'Studies show correlation', C: 'smoking causes cancer'. You must add missing logical steps to make this valid, then merge back into original argument.",
             inputSchema: {
               type: "object",
               properties: {
                 mode: {
                   type: "string",
-                  enum: ["setup", "cleanup"],
-                  description: "setup or cleanup mode"
+                  enum: ["setup", "merge_subargument"],
+                  description: "setup: Create new sub-argument. merge_subargument: Merge completed sub-argument back."
                 },
-                evidence_output: {
+                evidence_text: {
                   type: "string",
-                  description: "evidence_gathering output"
+                  description: "THE EVIDENCE TEXT ALREADY PROVIDED - this becomes the NEW PREMISE in the sub-argument (required for setup mode)"
                 },
-                target_requirement_index: {
-                  type: "number",
-                  description: "Evidence requirement index"
+                atom_or_implication: {
+                  type: "string",
+                  description: "THE ATOM OR IMPLICATION this evidence was provided for - this becomes the NEW CONCLUSION in the sub-argument (required for setup mode)"
+                },
+                original_argument: {
+                  type: "string",
+                  description: "The original full argument text (required for merge_subargument mode)"
                 },
                 completed_subargument: {
-                  type: "string", 
-                  description: "Completed sub-argument"
+                  type: "string",
+                  description: "The completed logically valid sub-argument (required for merge_subargument mode)"
                 }
               },
-              required: ["mode", "target_requirement_index"]
+              required: ["mode", "evidence_text", "atom_or_implication", "original_argument", "completed_subargument"],
+              additionalProperties: false
             }
           },
         ] satisfies Tool[],
@@ -618,172 +623,93 @@ text: JSON.stringify({
         }
 
         case "dig_in": {
-          const { mode, evidence_output, target_requirement_index, completed_subargument } = args as { 
-            mode: "setup" | "cleanup"; 
-            evidence_output?: string; 
-            target_requirement_index: number; 
-            completed_subargument?: string 
+          const { mode, evidence_text, atom_or_implication, original_argument, completed_subargument } = args as {
+            mode: "setup" | "merge_subargument";
+            evidence_text?: string;
+            atom_or_implication?: string;
+            original_argument?: string;
+            completed_subargument?: string;
           };
 
           if (mode === "setup") {
-            // Setup mode: Extract evidence and create sub-argument
-            if (!evidence_output) {
-              throw new Error("evidence_output is required for setup mode");
+            if (!evidence_text || !atom_or_implication) {
+              throw new Error("evidence_text and atom_or_implication are required for setup mode");
             }
 
-            try {
-              const evidenceAnalysis = JSON.parse(evidence_output);
-              if (!evidenceAnalysis.evidence_analysis?.evidence_requirements) {
-                throw new Error("Invalid evidence_gathering output - missing evidence_requirements");
-              }
+            // Create sub-argument: evidence becomes premise, atom/implication becomes conclusion
+            const evidencePremise = `Premise 1: ${evidence_text}`;
+            const targetConclusion = `Conclusion: ${atom_or_implication}`;
+            const subArgument = `${evidencePremise}\n\n${targetConclusion}`;
 
-              const requirements = evidenceAnalysis.evidence_analysis.evidence_requirements;
-              if (target_requirement_index < 0 || target_requirement_index >= requirements.length) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                      error: "INVALID_INDEX",
-                      message: `Index ${target_requirement_index} out of range. Available indices: 0-${requirements.length - 1}`,
-                      available_requirements: requirements.map((req: any, i: number) => ({
-                        index: i,
-                        type: req.type,
-                        target: req.target,
-                        provided: req.provided
-                      }))
-                    }, null, 2)
-                  }]
-                };
-              }
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  setup_result: {
+                    sub_argument_text: subArgument,
+                    explanation: [
+                      "The evidence you already provided has become the PREMISE of this NEW sub-argument.",
+                      "The atom/implication has become the CONCLUSION of this NEW sub-argument.",
+                      "Make the logical connection FROM your evidence TO the atom/implication valid."
+                    ],
+                    instructions: [
+                      "1. Use 'rlmcp_reason' on the sub_argument_text above",
+                      "2. The argument will likely FAIL validation (logical gap between evidence and conclusion)",
+                      "3. Use 'diagnose_gaps' to identify what logical steps are missing",
+                      "4. Add missing premises to create a valid logical chain from evidence to conclusion",
+                      "5. Re-run 'rlmcp_reason' until the sub-argument is logically VALID",
+                      "6. Run 'evidence_gathering' to ensure all new premises have evidence",
+                      "7. When complete, use 'dig_in' with mode='merge_subargument' to integrate the valid sub-argument back"
+                    ],
+                    evidence_now_premise: evidence_text,
+                    atom_implication_now_conclusion: atom_or_implication
+                  }
+                }, null, 2)
+              }]
+            };
 
-              const targetRequirement = requirements[target_requirement_index];
-              if (!targetRequirement.evidence) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                      error: "NO_EVIDENCE",
-                      message: `Requirement ${target_requirement_index} has no evidence to dig into yet. Provide evidence first.`,
-                      requirement: targetRequirement
-                    }, null, 2)
-                  }]
-                };
-              }
-
-              // Create sub-argument structure
-              const evidencePremise = `Premise 1: ${targetRequirement.evidence.summary}`;
-              const targetConclusion = `Conclusion: ${targetRequirement.target.replace(/[()]/g, '').replace(/→/g, 'implies').replace(/∧/g, 'and').replace(/∨/g, 'or')}`;
-              const subArgument = `${evidencePremise}\n\n${targetConclusion}`;
-
-              return {
-                content: [{
-                  type: "text", 
-                  text: JSON.stringify({
-                    setup_result: {
-                      sub_argument_text: subArgument,
-                      original_context: {
-                        evidence_output: evidence_output,
-                        target_requirement_index: target_requirement_index,
-                        original_requirement: targetRequirement
-                      },
-                      instructions: [
-                        "1. Use 'rlmcp_reason' on the sub_argument_text above",
-                        "2. The argument will likely FAIL validation (logical gap between evidence and conclusion)",
-                        "3. Use 'diagnose_gaps' to identify missing logical bridges", 
-                        "4. Add missing premises to create a valid logical chain",
-                        "5. Re-run 'rlmcp_reason' until the sub-argument is logically valid",
-                        "6. Run 'evidence_gathering' to ensure all premises have evidence",
-                        "7. When complete, use 'dig_in' with mode='cleanup' to integrate back"
-                      ],
-                      target_conclusion: targetRequirement.target,
-                      evidence_strength: targetRequirement.evidence.strength,
-                      evidence_citation: targetRequirement.evidence.citation
-                    }
-                  }, null, 2)
-                }]
-              };
-
-            } catch (error) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    error: "INVALID_INPUT",
-                    message: "Failed to parse evidence_gathering output",
-                    details: error instanceof Error ? error.message : String(error)
-                  }, null, 2)
-                }]
-              };
+          } else if (mode === "merge_subargument") {
+            if (!original_argument || !completed_subargument) {
+              throw new Error("original_argument and completed_subargument are required for merge_subargument mode");
             }
 
-          } else if (mode === "cleanup") {
-            // Cleanup mode: Integrate completed sub-argument back into original
-            if (!evidence_output || !completed_subargument) {
-              throw new Error("evidence_output and completed_subargument are required for cleanup mode");
-            }
+            // Parse the completed sub-argument to extract premises
+            const subArg = this.parser.parseArgument(completed_subargument);
+            const subPremises = subArg.premises.map((p: any) => p.originalText);
 
-            try {
-              const evidenceAnalysis = JSON.parse(evidence_output);
-              const originalAnalysis = evidenceAnalysis.original_rlmcp_analysis;
-              
-              if (!originalAnalysis) {
-                throw new Error("Invalid evidence_gathering output - missing original_rlmcp_analysis");
-              }
+            // Parse the original argument
+            const originalArg = this.parser.parseArgument(original_argument);
+            const originalPremises = originalArg.premises.map((p: any) => p.originalText);
 
-              // Parse the completed sub-argument to extract logical chain
-              const subArg = this.parser.parseArgument(completed_subargument);
-              const subPremises = subArg.premises.map((p: any) => p.originalText);
+            // Merge: Add sub-argument premises to the original argument
+            const mergedPremises = [...subPremises, ...originalPremises];
 
-              // Extract the original argument premises
-              const originalArg = this.parser.parseArgument(originalAnalysis.original_task);
-              const originalPremises = originalArg.premises.map((p: any) => p.originalText);
-              
-              // Replace the target premise with the expanded logical chain
-              const updatedPremises = [...originalPremises];
-              
-              // Find and replace the target premise with sub-argument premises
-              const requirements = evidenceAnalysis.evidence_analysis.evidence_requirements;
-              const targetRequirement = requirements[target_requirement_index];
-              const targetText = targetRequirement.target.replace(/[()]/g, '').replace(/→/g, 'implies').replace(/∧/g, 'and').replace(/∨/g, 'or');
-              
-              // Replace with expanded premises from sub-argument
-              updatedPremises.splice(target_requirement_index, 0, ...subPremises);
+            // Reconstruct the expanded argument
+            const mergedArgument = mergedPremises.map((p, i) => `Premise ${i + 1}: ${p}`).join('\n') +
+              `\nConclusion: ${originalArg.conclusion.originalText}`;
 
-              // Reconstruct the argument
-              const updatedArgument = updatedPremises.map((p, i) => `P${i + 1}. ${p}`).join('\n') + 
-                `\nConclusion: ${originalArg.conclusion.originalText}`;
-
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    integration_result: {
-                      updated_argument: updatedArgument,
-                      integration_summary: `Replaced premise ${target_requirement_index + 1} with ${subPremises.length} expanded premises from sub-argument`,
-                      original_premise_count: originalPremises.length,
-                      new_premise_count: updatedPremises.length,
-                      expanded_premises: subPremises,
-                      validation_status: "Integration complete - run 'rlmcp_reason' and 'evidence_gathering' to validate expanded argument"
-                    }
-                  }, null, 2)
-                }]
-              };
-
-            } catch (error) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    error: "INTEGRATION_FAILED", 
-                    message: "Failed to integrate completed sub-argument",
-                    details: error instanceof Error ? error.message : String(error)
-                  }, null, 2)
-                }]
-              };
-            }
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  integration_result: {
+                    merged_argument: mergedArgument,
+                    integration_summary: `Merged ${subPremises.length} premises from sub-argument into original argument`,
+                    original_premise_count: originalPremises.length,
+                    subargument_premise_count: subPremises.length,
+                    total_premise_count: mergedPremises.length,
+                    next_steps: [
+                      "1. Run 'rlmcp_reason' on the merged_argument to validate logical structure",
+                      "2. Run 'evidence_gathering' to ensure all premises have evidence",
+                      "3. Use 'dig_in' again for any remaining logical gaps"
+                    ]
+                  }
+                }, null, 2)
+              }]
+            };
 
           } else {
-            throw new Error(`Invalid mode: ${mode}. Must be 'setup' or 'cleanup'`);
+            throw new Error(`Invalid mode: ${mode}. Must be 'setup' or 'merge_subargument'`);
           }
         }
 

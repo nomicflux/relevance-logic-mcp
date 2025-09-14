@@ -217,16 +217,6 @@ describe('FormulaUtils - Core Functions', () => {
       expect(result).toBe(true);
     });
 
-    test('REJECTS distribution that breaks relevance', () => {
-      const A = FormulaBuilder.atomic('A', []);
-      const B = FormulaBuilder.atomic('B', []);
-      const C = FormulaBuilder.atomic('C', []);
-      const disjunction = FormulaBuilder.or(B, C);
-      const formula = FormulaBuilder.and(A, disjunction);
-
-      const result = (FormulaUtils as any).checkValidDistributionPattern(formula);
-      expect(result).toBe(true); // Always true now
-    });
 
     test('validate detects circular reasoning in conjunctions', () => {
       const conclusion = FormulaBuilder.atomic('Q', []);
@@ -249,14 +239,6 @@ describe('FormulaUtils - Core Functions', () => {
       expect(result).toBe(true);
     });
 
-    test('implication distribution preserves variable sharing', () => {
-      const antecedent = FormulaBuilder.atomic('P', []);
-      const consequent = FormulaBuilder.atomic('Q', []);
-      const implication = FormulaBuilder.implies(antecedent, consequent);
-
-      const transformations = (FormulaUtils as any).applyImplicationDistribution(implication);
-      expect(transformations).toBeNull(); // Returns null for now
-    });
 
   });
 });

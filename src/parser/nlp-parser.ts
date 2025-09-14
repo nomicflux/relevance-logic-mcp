@@ -104,6 +104,26 @@ export class NaturalLanguageParser {
       },
 
       {
+        pattern: /^(.+) while (.+)$/i,
+        builder: (match, vars) => {
+          const left = this.parseSimpleStatement(match[1], vars);
+          const right = this.parseSimpleStatement(match[2], vars);
+          return FormulaBuilder.and(left, right, match[0]);
+        },
+        description: "Conjunction: 'P while Q'"
+      },
+
+      {
+        pattern: /^(.+) whereas (.+)$/i,
+        builder: (match, vars) => {
+          const left = this.parseSimpleStatement(match[1], vars);
+          const right = this.parseSimpleStatement(match[2], vars);
+          return FormulaBuilder.and(left, right, match[0]);
+        },
+        description: "Conjunction: 'P whereas Q'"
+      },
+
+      {
         pattern: /^(.+) or (.+)$/i,
         builder: (match, vars) => {
           const left = this.parseSimpleStatement(match[1], vars);
