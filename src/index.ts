@@ -166,7 +166,7 @@ class RelevanceLogicServer {
           },
           {
             name: "evidence_gathering",
-            description: "Evidence gathering for logically valid arguments. Requires evidence for atoms and implications. Works with rlmcp_reason output.",
+            description: "Validate that EVERY atom and implication has evidence. Only succeeds when ALL have complete evidence triples. Put evidence in context parameter like: 'atom/implication: summary=evidence text, strength=0.8, citation=source'",
             inputSchema: {
               type: "object",
               properties: {
@@ -176,7 +176,7 @@ class RelevanceLogicServer {
                 },
                 context: {
                   type: "string",
-                  description: "Evidence context",
+                  description: "Evidence for each atom/implication. Format: 'target: summary=text, strength=0.5, citation=source' (one per line)",
                   default: ""
                 }
               },
@@ -279,14 +279,33 @@ text: JSON.stringify({
             gapAnalysis = this.diagnoseLogicalGaps(task);
           }
           
-          const logicalStatus = validation.validation_results.overallValid ? "valid" : "invalid";
+          // Check if evidence is required based on task wording
+          const evidenceRequired = /with evidence|using evidence|including evidence/i.test(task);
+
+          let finalStatus = "invalid";
+          let finalGuidance = "";
+          let finalNextSteps: string[] = [];
 
           const isCircular = validation.validation_results.failures.some((f: { constraint_violated: string }) => f.constraint_violated.includes('CIRCULAR REASONING'));
-          const guidance = validation.validation_results.overallValid ? 
-            "✅ Valid - ready for use" :
-            isCircular ? 
+
+          if (!validation.validation_results.overallValid) {
+            // Logic is invalid - must fix first
+            finalStatus = "invalid";
+            finalGuidance = isCircular ?
               "❌ CIRCULAR REASONING - you're not being explicit about your intuitions and domain knowledge. Make implicit assumptions into explicit premises." :
               "❌ INVALID - argument rejected. Must fix logical structure before proceeding. Use rlmcp_help if struggling.";
+            finalNextSteps = this.generateSpecificNextSteps(gapAnalysis, structured);
+          } else if (evidenceRequired) {
+            // Logic is valid but evidence is required - argument not complete until evidence gathering succeeds
+            finalStatus = "logically_valid_but_evidence_required";
+            finalGuidance = "✅ Logic is valid but evidence required. Argument NOT COMPLETE until evidence_gathering succeeds for all atoms and implications.";
+            finalNextSteps = ["🚨 REQUIRED: Use evidence_gathering tool to provide evidence for all atoms and implications before argument is considered complete"];
+          } else {
+            // Logic is valid and no evidence required - complete
+            finalStatus = "valid";
+            finalGuidance = "✅ Valid - ready for use";
+            finalNextSteps = ["✅ Use evidence_gathering if evidence needed"];
+          }
 
           return {
             content: [
@@ -300,12 +319,15 @@ text: JSON.stringify({
                       premises: structured.premises.map(p => p.originalText),
                       conclusion: structured.conclusion.originalText
                     },
-                    validation_results: validation.validation_results,
+                    validation_results: {
+                      ...validation.validation_results,
+                      overallValid: evidenceRequired ? false : validation.validation_results.overallValid,
+                      finalStatus: finalStatus
+                    },
+                    evidence_required: evidenceRequired,
                     gap_analysis: gapAnalysis,
-                    guidance: guidance,
-                    next_steps: validation.validation_results.overallValid ? 
-                      ["✅ Use evidence_gathering if evidence needed"] :
-                      this.generateSpecificNextSteps(gapAnalysis, structured),
+                    guidance: finalGuidance,
+                    next_steps: finalNextSteps,
                     recommendations: gapAnalysis?.recommendations || [
                       "All premises are in the same connected component as the conclusion"
                     ]
@@ -481,86 +503,83 @@ text: JSON.stringify({
         
         case "evidence_gathering": {
           const { rlmcp_output, context } = args as { rlmcp_output: string; context?: string };
-          
+
           try {
             // Parse the rlmcp_reason output
             const rlmcpAnalysis = JSON.parse(rlmcp_output);
-            
-            // Verify it's valid rlmcp_reason output
+
             if (!rlmcpAnalysis.rlmcp_analysis) {
               throw new Error("Input must be valid JSON output from rlmcp_reason tool");
             }
-            
+
             const analysis = rlmcpAnalysis.rlmcp_analysis;
-            
-            // Check logical validity first - evidence only applies to valid arguments
-            if (analysis.validation_results && !analysis.validation_results.overallValid) {
-              return {
-                content: [{
-                  type: "text",
-text: JSON.stringify({
-                    error: "LOGICAL_VALIDATION_FAILED",
-                    message: "Fix logic first with rlmcp_reason. Use rlmcp_help if struggling.",
-                    issues: analysis.gap_analysis || analysis.validation_results
-                  }, null, 2)
-                }]
-              };
-            }
-            
-            // Extract structured argument from original task - need to re-parse to get full structure
+
+            // Extract structured argument to find all atoms and implications
             const structured = this.parser.parseArgument(analysis.original_task);
-            
-            // Generate evidence requirements for all logical components
-            const complianceReport = this.evidenceModule.enforceEvidenceCompliance({
-              premises: structured.premises,
-              conclusion: structured.conclusion,
-              validation: { validation: analysis.validation_results }
+            const allFormulas = [...structured.premises.map((p: any) => p.formula), structured.conclusion.formula];
+
+            // Find all atoms and implications that need evidence
+            const atomsNeededEvidence = new Set<string>();
+            const implicationsNeededEvidence = new Set<string>();
+
+            allFormulas.forEach((formula: LogicFormula) => {
+              const atoms = FormulaUtils.extractAtomicFormulas(formula);
+              atoms.forEach(atom => {
+                atomsNeededEvidence.add(FormulaUtils.toString(atom));
+              });
+
+              if (formula.type === 'compound' && formula.operator === 'implies') {
+                implicationsNeededEvidence.add(FormulaUtils.toString(formula));
+              }
             });
-            
-            // Return combined validation: BOTH logic AND evidence must pass
-            const overallValid = analysis.validation_results.overallValid && complianceReport.isCompliant;
-            
-            const evidenceSummary = this.evidenceModule.generateComplianceSummary(complianceReport.requirements);
-            
+
+            // Parse evidence from context parameter
+            const providedEvidence = this.parseEvidenceFromContext(context || "");
+
+            // Check if every atom and implication has complete evidence
+            const missingEvidence: string[] = [];
+            const allRequiredItems = [...Array.from(atomsNeededEvidence), ...Array.from(implicationsNeededEvidence)];
+
+            allRequiredItems.forEach(item => {
+              const evidence = providedEvidence.find(e => e.target === item);
+              if (!evidence || !evidence.summary || evidence.strength === undefined || !evidence.citation) {
+                missingEvidence.push(item);
+              }
+            });
+
+            const allEvidenceComplete = missingEvidence.length === 0;
+
             return {
               content: [{
                 type: "text",
                 text: JSON.stringify({
-                  original_rlmcp_analysis: analysis,
-                  evidence_analysis: {
-                    overall_status: overallValid ? "valid_with_evidence" : "PROCESS_INCOMPLETE",
-                    progress: `${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} evidence provided`,
-                    status_message: overallValid ?
-                      "✅ COMPLETE - argument is valid with complete evidence" :
-                      `🚫 ARGUMENT REJECTED - Status: ${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} evidence provided - MUST complete all ${evidenceSummary.totalRequired} before argument is valid`,
-                    mandatory_next_step: overallValid ?
-                      "Argument complete" :
-                      `NEXT: Call evidence_gathering again with evidence for each requirement below. Format: {summary: "text", strength: 0-1, citation: "source"}`,
-                    evidence_requirements: complianceReport.requirements.map((req, index) => ({
-                      index: index,
-                      type: req.type,
-                      target: req.target,
-                      description: req.description,
-                      provided: req.provided,
-                      evidence: req.evidence || null,
-                      status: req.provided ? "✅ COMPLETE" : "🚫 MISSING - REQUIRED",
-                      instruction: req.provided ?
-                        "Evidence provided" :
-                        `MUST provide evidence for: "${req.target}". Call evidence_gathering with: {summary: "your evidence text", strength: 0.0-1.0, citation: "source"}`
-                    })),
-                    evidence_summary: evidenceSummary
-                  }
+                  evidence_gathering_result: {
+                    success: allEvidenceComplete,
+                    status: allEvidenceComplete ?
+                      "✅ SUCCESS - All atoms and implications have complete evidence" :
+                      `🚫 FAILURE - ${missingEvidence.length} items missing evidence`,
+                    required_items: allRequiredItems.length,
+                    provided_items: allRequiredItems.length - missingEvidence.length,
+                    missing_evidence: missingEvidence.length > 0 ? missingEvidence.map(item => ({
+                      item: item,
+                      instruction: `MUST provide evidence for: "${item}". Format in context: "${item}: summary=your evidence text, strength=0.0-1.0, citation=your source"`
+                    })) : [],
+                    next_step: allEvidenceComplete ?
+                      "Evidence gathering complete - argument validated with evidence" :
+                      `EXACTLY what to do: Call evidence_gathering again with context parameter containing evidence for: ${missingEvidence.join(", ")}`
+                  },
+                  original_rlmcp_analysis: analysis
                 }, null, 2)
               }]
             };
-            
+
           } catch (error) {
             return {
               content: [{
-                type: "text", 
+                type: "text",
                 text: JSON.stringify({
                   error: "INVALID_INPUT",
-                  message: "Failed to parse rlmcp_reason output. Ensure input is valid JSON from rlmcp_reason tool.",
+                  message: "Failed to process evidence_gathering request",
                   details: error instanceof Error ? error.message : String(error)
                 }, null, 2)
               }]
@@ -1504,6 +1523,40 @@ Do this validation transparently, then present the improved reasoning.`
       await this.server.close();
       process.exit(0);
     });
+  }
+
+  private parseEvidenceFromContext(context: string): Array<{target: string, summary: string, strength: number, citation: string}> {
+    const evidence: Array<{target: string, summary: string, strength: number, citation: string}> = [];
+
+    if (!context || context.trim().length === 0) {
+      return evidence;
+    }
+
+    // Parse evidence from context in format: "target: summary=text, strength=0.5, citation=source"
+    const lines = context.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+
+      // Look for pattern: "target: summary=..., strength=..., citation=..."
+      const match = trimmed.match(/^(.+?):\s*summary=(.+?),\s*strength=([0-9.]+),\s*citation=(.+)$/i);
+      if (match) {
+        const [, target, summary, strengthStr, citation] = match;
+        const strength = parseFloat(strengthStr);
+
+        if (!isNaN(strength) && strength >= 0 && strength <= 1) {
+          evidence.push({
+            target: target.trim(),
+            summary: summary.trim(),
+            strength: strength,
+            citation: citation.trim()
+          });
+        }
+      }
+    }
+
+    return evidence;
   }
 
   async run(): Promise<void> {
