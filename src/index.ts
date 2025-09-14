@@ -528,17 +528,25 @@ text: JSON.stringify({
                 text: JSON.stringify({
                   original_rlmcp_analysis: analysis,
                   evidence_analysis: {
-                    overall_status: overallValid ? "valid_with_evidence" : (analysis.validation_results.overallValid ? "invalid_and_not_supported" : "invalid"),
+                    overall_status: overallValid ? "valid_with_evidence" : "PROCESS_INCOMPLETE",
                     progress: `${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} evidence provided`,
-                    guidance: overallValid ? 
-                      "✅ Success - valid with complete evidence" :
-                      "❌ Incomplete - need both logic AND evidence. Use rlmcp_help if struggling.",
-                    evidence_requirements: complianceReport.requirements.map(req => ({
+                    status_message: overallValid ?
+                      "✅ COMPLETE - argument is valid with complete evidence" :
+                      `🚫 ARGUMENT REJECTED - Status: ${evidenceSummary.totalProvided}/${evidenceSummary.totalRequired} evidence provided - MUST complete all ${evidenceSummary.totalRequired} before argument is valid`,
+                    mandatory_next_step: overallValid ?
+                      "Argument complete" :
+                      `NEXT: Call evidence_gathering again with evidence for each requirement below. Format: {summary: "text", strength: 0-1, citation: "source"}`,
+                    evidence_requirements: complianceReport.requirements.map((req, index) => ({
+                      index: index,
                       type: req.type,
                       target: req.target,
                       description: req.description,
                       provided: req.provided,
-                      evidence: req.evidence || null
+                      evidence: req.evidence || null,
+                      status: req.provided ? "✅ COMPLETE" : "🚫 MISSING - REQUIRED",
+                      instruction: req.provided ?
+                        "Evidence provided" :
+                        `MUST provide evidence for: "${req.target}". Call evidence_gathering with: {summary: "your evidence text", strength: 0.0-1.0, citation: "source"}`
                     })),
                     evidence_summary: evidenceSummary
                   }
