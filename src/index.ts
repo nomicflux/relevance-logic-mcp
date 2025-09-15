@@ -193,6 +193,37 @@ class RelevanceLogicServer {
             },
           },
           {
+            name: "prepare_logical_plan",
+            description: "Create a logical plan structure for validation with RLMCP. Triggered by 'Plan to do X using RLMCP'. The argument you create IS the implementation plan. REQUIREMENTS: Each premise must be a specific, actionable implementation step. You must specify how steps relate to each other. Each implication must show the logical dependency between concrete steps. The conclusion should only be reachable through the chain of specific implementation steps.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                goal: {
+                  type: "string",
+                  description: "The goal/objective that will become the conclusion. Must be reachable only through the chain of specific implementation steps."
+                },
+                actionable_implementation_steps: {
+                  type: "array",
+                  description: "Array of specific, actionable implementation steps that will become premises. Each must be concrete and executable, not abstract concepts.",
+                  items: {
+                    type: "string",
+                    description: "A specific, actionable implementation step (e.g., 'Create user authentication module', not 'Handle security')"
+                  }
+                },
+                step_relationships: {
+                  type: "array",
+                  description: "REQUIRED: How do the steps relate to each other? Which steps enable other steps? Which steps are necessary for others? For example: 'Step 1 enables Step 2', 'Step 3 is necessary for Step 4', 'If Step 5, then Step 6'.",
+                  items: {
+                    type: "string",
+                    description: "A relationship between steps using enabling/dependency language (e.g., 'Creating database schema enables populating initial data')"
+                  },
+                  minItems: 1
+                }
+              },
+              required: ["goal", "actionable_implementation_steps", "step_relationships"],
+            },
+          },
+          {
             name: "rlmcp_help",
             description: "Get guidance for RLMCP validation struggles. Provides solutions for common logical issues.",
             inputSchema: {
@@ -629,28 +660,118 @@ text: JSON.stringify({
           }
         }
 
+        case "prepare_logical_plan": {
+          const { goal, actionable_implementation_steps, step_relationships } = args as {
+            goal: string;
+            actionable_implementation_steps: string[];
+            step_relationships: string[];
+          };
+
+          // Validate step_relationships is not empty
+          if (!step_relationships || step_relationships.length === 0) {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  error: "MISSING_STEP_RELATIONSHIPS",
+                  message: "You must specify how steps relate to each other. Which steps enable other steps? Which steps are necessary for others?",
+                  required_format: [
+                    "Step 1 enables Step 2",
+                    "Step 3 is necessary for Step 4",
+                    "If Step 5, then Step 6"
+                  ],
+                  instruction: "Think through the dependencies and enabling relationships between your implementation steps before proceeding."
+                }, null, 2)
+              }]
+            };
+          }
+
+          // Create structured plan with implications
+          const planStructure = this.createPlanStructure(goal, actionable_implementation_steps, step_relationships);
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                rlmcp_reason_input: {
+                  goal: goal,
+                  actionable_implementation_steps: actionable_implementation_steps,
+                  structured_argument: planStructure.argument,
+                  requirements_check: {
+                    premise_requirement: "Each premise must be a specific, actionable implementation step",
+                    implication_requirement: "Each implication must show the logical dependency between concrete steps",
+                    conclusion_requirement: "The conclusion should only be reachable through the chain of specific implementation steps"
+                  },
+                  plan_to_submit_to_rlmcp_reason: planStructure.argument,
+                  STOP_DO_NOT_CREATE_PLANS_OUTSIDE_THIS_TOOL: "This output IS the complete plan. There must not be any steps in the plan that are not represented in this tool. Every implementation step must be listed as a premise in the structured argument above.",
+                  MANDATORY_NEXT_STEP: "🚨 YOU MUST COPY THE STRUCTURED_ARGUMENT ABOVE AND PASTE IT INTO rlmcp_reason TO VALIDATE IT. DO NOT SKIP THIS STEP.",
+                  VALIDATION_REQUIRED: {
+                    status: "VALIDATION_PENDING",
+                    instruction: "Copy the entire structured_argument text above and use rlmcp_reason tool to validate it. This is MANDATORY.",
+                    argument_to_validate: planStructure.argument,
+                    warning: "The plan is NOT complete until validated with rlmcp_reason"
+                  },
+                  critical_warning: "🚨 YOU MUST USE THE TOOLS FROM THIS MCP SERVER. Use prepare_logical_plan then rlmcp_reason. Copy the structured_argument above into rlmcp_reason tool."
+                }
+              }, null, 2)
+            }]
+          };
+        }
+
         case "rlmcp_help": {
           const { struggling_with } = args as { struggling_with?: string };
-          
+
           const helpContent = {
-            message: "🆘 RLMCP Help - This tool works with proper approach",
-            
+            message: "🆘 RLMCP Help - Different approaches for logical arguments vs implementation plans",
+
+            logical_arguments_vs_plans: {
+              logical_arguments: {
+                purpose: "Prove conclusions through logical reasoning",
+                when_disconnected: "SIMPLIFY - remove irrelevant premises",
+                approach: "Strip down to essential logical connections"
+              },
+              implementation_plans: {
+                purpose: "Show how steps connect to achieve goals",
+                when_disconnected: "ADD CONNECTIONS - show how steps enable each other",
+                connecting_phrases: [
+                  "A enables B",
+                  "A is necessary for B",
+                  "Once A, then B",
+                  "If A is completed, then B can be executed",
+                  "Completing A allows B to proceed"
+                ],
+                approach: "Add explicit dependency statements between steps"
+              }
+            },
+
             mindset: {
               wrong: "Tool too restrictive",
               right: "Tool exposes gaps I need to fill explicitly"
             },
-            
+
             blocks: {
               atoms: ["mammal(dolphin)", "warm_blooded(x)"],
               and: "P(x) ∧ Q(x)",
-              or: "P(x) ∨ Q(x)", 
+              or: "P(x) ∨ Q(x)",
               implies: ["mammal(x) → warm_blooded(x)", "Chain implications to build logical paths"]
+            },
+
+            common_errors: {
+              different_predicates: {
+                error: "COMMON ERROR: Different wordings create different predicates",
+                wrong: "achieves complete implementation vs complete implementation",
+                right: "Use IDENTICAL phrases in premise and conclusion",
+                explanation: "The system treats 'achieves X' and 'X' as completely different predicates with no connection"
+              }
             },
             
             simplicity: {
-              rule: "Single premise + implication can be perfect",
-              wrong: "6 premises comparing every feature",
-              right: "P1: has_static_typing(ts), P2: static_typing_better_large_projects, C: ts_better_large_projects",
+              rule: "Simplify without losing details - remove redundant paths, keep specific steps",
+              wrong_redundant: "P1: A, P2: A -> B, P3: C, P4: C -> B, C: B (two paths to same conclusion)",
+              right_simplified: "P1: A, P2: A -> B, C: B (one clear path)",
+              when_better_info_available: "WHEN there is better information, THEN the more specific argument is better",
+              example_improvement: "P1: A, P2: A -> B, C: B becomes P1: A, P2: A -> A', P3: A' -> A'', P4: A'' -> B, C: B (when you know the intermediate steps)",
+              principle: "More premises to prove same point = bad. Breaking down argument into specific premises = good",
               test: "If you can remove a premise and argument still works, remove it"
             },
             
@@ -664,12 +785,29 @@ text: JSON.stringify({
             success: {
               goal: "Strict logical validity",
               approach: "Continue until successful, change premises/conclusions as needed",
-              when_stuck: "Ask user for help with specific gap"
+              when_stuck: "Ask user for help with specific gap",
+              expectations: [
+                "Expecting that logical validation would require multiple iterations and failed attempts",
+                "Understanding that the first attempt at a complex logical argument should fail - that's normal",
+                "Failure is feedback - use it to improve the argument structure"
+              ]
             },
-            
+
             fixes: {
+              disconnected_premises_logical_arguments: [
+                "SIMPLIFY: Remove unconnected premises",
+                "SIMPLIFY: Change conclusion to match premises",
+                "Add bridging premise: 'If P then Q' only if needed for logic"
+              ],
+              disconnected_premises_implementation_plans: [
+                "ADD CONNECTIONS: 'Step A enables step B'",
+                "ADD CONNECTIONS: 'Step A is necessary for step B'",
+                "ADD CONNECTIONS: 'Once step A, then step B'",
+                "ADD CONNECTIONS: 'If A is completed, then B can be executed'",
+                "Show how completing steps leads to achieving the goal"
+              ],
               connections: "Add implications connecting premises to conclusion",
-              big_leaps: "Break into smaller steps", 
+              big_leaps: "Break into smaller steps",
               domain: "Make expertise explicit as premises",
               evidence: "Find evidence or revise claims"
             },
@@ -917,7 +1055,7 @@ Do this validation transparently, then present the improved reasoning.`
           if (premiseMatches) {
             const disconnectedPremises = premiseMatches[1].split(', P').map(p => p.replace('P', ''));
             analysis.errors.push(`SPECIFIC ISSUE: Premise${disconnectedPremises.length > 1 ? 's' : ''} ${disconnectedPremises.join(', ')} not connected to conclusion`);
-            analysis.errors.push("TO FIX: Remove disconnected premises");
+            analysis.errors.push("TO FIX: Add premises that explicitly connect your implementation steps to the conclusion. For example: 'If step P1 is completed, then step P2 can be executed' or 'Step P1 enables step P2'. CRITICAL: Use EXACT SAME WORDING throughout - if conclusion says 'database is configured' then premises must use 'database is configured' not 'database configuration' or other variations. Alternative: if disconnected premises don't help the argument, remove them instead of trying to connect them.");
           }
         } else if (constraint.includes('CIRCULAR REASONING:')) {
           analysis.errors.push("TO FIX: Replace circular premise with explicit supporting premises");
@@ -949,7 +1087,7 @@ Do this validation transparently, then present the improved reasoning.`
 
   private getFailureExplanation(constraint: string): string {
     if (constraint.includes('DISCONNECTED:')) {
-      return 'These premises are in a disconnected component from the conclusion and must be removed';
+      return 'These premises are in a disconnected component from the conclusion. Add premises that explicitly state how these implementation steps lead to successful implementation, such as: "If step X is completed, then step Y can be executed" or "Step X enables step Y". CRITICAL: Use EXACT SAME WORDING throughout - if conclusion says "system is deployed" then premises must use "system is deployed" not "system deployment" or other variations. Alternative: if these disconnected premises don\'t help the argument, remove them instead of trying to connect them.';
     }
     if (constraint.includes('CIRCULAR REASONING:')) {
       return 'Premise is identical to or contains the conclusion, making the argument circular';
@@ -1599,6 +1737,19 @@ Do this validation transparently, then present the improved reasoning.`
     }
 
     return evidence;
+  }
+
+  private createPlanStructure(goal: string, proposed_steps: string[], step_relationships: string[]): {argument: string, implications: string[]} {
+    // Create argument structure with provided step relationships
+    const premises = proposed_steps.map((step, index) => `Premise ${index + 1}: ${step}`);
+    const relationshipPremises = step_relationships.map((rel, index) => `Premise ${proposed_steps.length + index + 1}: ${rel}`);
+    const conclusion = `Conclusion: ${goal}`;
+    const argument = [...premises, ...relationshipPremises, '', conclusion].join('\n');
+
+    return {
+      argument: argument,
+      implications: step_relationships
+    };
   }
 
   async run(): Promise<void> {

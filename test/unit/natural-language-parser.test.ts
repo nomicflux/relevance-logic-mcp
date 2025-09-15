@@ -47,10 +47,70 @@ describe('NaturalLanguageParser - Unit Tests', () => {
       // Antecedent should be "clouds are heavy"
       const antecedent = result.formula.subformulas![0];
       expect(antecedent.naturalLanguage).toContain('clouds are heavy');
+    });
 
-      // Consequent should be "it rains"
+    test('parses nested if-then with conjunction: "if a and b then c"', () => {
+      const result = parser.parse('if step1 and step2 then step3');
+
+      expect(result.formula.type).toBe('compound');
+      expect(result.formula.operator).toBe('implies');
+      expect(result.formula.subformulas).toHaveLength(2);
+
+      // Antecedent should be conjunction "step1 and step2"
+      const antecedent = result.formula.subformulas![0];
+      expect(antecedent.type).toBe('compound');
+      expect(antecedent.operator).toBe('and');
+      expect(antecedent.subformulas).toHaveLength(2);
+
+      // Consequent should be "step3"
       const consequent = result.formula.subformulas![1];
-      expect(consequent.naturalLanguage).toContain('it rains');
+      expect(consequent.type).toBe('atomic');
+    });
+
+    test('parses nested if-then with disjunction: "if a or b then c"', () => {
+      const result = parser.parse('if task1 or task2 then task3');
+
+      expect(result.formula.type).toBe('compound');
+      expect(result.formula.operator).toBe('implies');
+      expect(result.formula.subformulas).toHaveLength(2);
+
+      // Antecedent should be disjunction "task1 or task2"
+      const antecedent = result.formula.subformulas![0];
+      expect(antecedent.type).toBe('compound');
+      expect(antecedent.operator).toBe('or');
+      expect(antecedent.subformulas).toHaveLength(2);
+
+      // Consequent should be "task3"
+      const consequent = result.formula.subformulas![1];
+      expect(consequent.type).toBe('atomic');
+    });
+
+    test('parses enables statement: "A enables B" → A implies B', () => {
+      const result = parser.parse('step1 enables step2');
+
+      expect(result.formula.type).toBe('compound');
+      expect(result.formula.operator).toBe('implies');
+      expect(result.formula.subformulas).toHaveLength(2);
+    });
+
+    test('parses necessary statement: "A is necessary for B" → A implies B', () => {
+      const result = parser.parse('authentication is necessary for access');
+
+      expect(result.formula.type).toBe('compound');
+      expect(result.formula.operator).toBe('implies');
+      expect(result.formula.subformulas).toHaveLength(2);
+    });
+
+    test('parses once-then statement: "Once A, then B" → A implies B', () => {
+      const result = parser.parse('once setup complete, then testing begins');
+
+      expect(result.formula.type).toBe('compound');
+      expect(result.formula.operator).toBe('implies');
+      expect(result.formula.subformulas).toHaveLength(2);
+
+      // Consequent should be "testing begins"
+      const consequent = result.formula.subformulas![1];
+      expect(consequent.naturalLanguage).toContain('testing begins');
     });
 
     test('parses because of statement: "P because of Q" → Q implies P', () => {

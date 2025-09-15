@@ -488,7 +488,17 @@ export class FormulaUtils {
         }
       });
       
-      violatedConstraints.push(`DISCONNECTED: ${disconnectedPremises.length} premise(s) not connected to conclusion - remove premises: P${disconnectedPremises.join(', P')}`);
+      // Check if conclusion is alone or has connected premises
+      const conclusionComponentSize = conclusionComponent?.length || 0;
+      const conclusionAlone = conclusionComponentSize === 1;
+
+      const firstDisconnectedPremise = disconnectedPremises[0];
+
+      if (conclusionAlone) {
+        violatedConstraints.push(`DISCONNECTED: ${disconnectedPremises.length} premise(s) not connected to conclusion - Make sure that you add implications from premises to the conclusion. Show how the premises lead to the conclusion and to each other. Do they imply each other? Make each other necessary? Enable each other? Can you add conditionals to connect them? SPECIFIC NEXT STEP: Start with premise P${firstDisconnectedPremise} - What does this premise enable? What follows from it? What dependencies does it have? Why is it a necessary part of the overall plan? CRITICAL: Use EXACT SAME WORDING throughout - if conclusion says "database is set up" then premises must use "database is set up" not "database setup completion" or other variations.`);
+      } else {
+        violatedConstraints.push(`DISCONNECTED: ${disconnectedPremises.length} premise(s) not connected to conclusion - Do you need the disconnected premises P${disconnectedPremises.join(', P')}? Do they help the argument? If they do, show how the disconnected premises imply others to create connections. If they do not give more information in a useful way, remove the disconnected premises. SPECIFIC NEXT STEP: Start with premise P${firstDisconnectedPremise} - What does this premise enable? What follows from it? What dependencies does it have? Why is it a necessary part of the overall plan? CRITICAL: Use EXACT SAME WORDING throughout - if conclusion says "user authentication" then premises must use "user authentication" not "user auth implementation" or other variations.`);
+      }
       return {
         isValid: false,
         violatedConstraints

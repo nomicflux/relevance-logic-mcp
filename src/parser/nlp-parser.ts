@@ -66,8 +66,8 @@ export class NaturalLanguageParser {
       {
         pattern: /^if (.+) then (.+)$/i,
         builder: (match, vars) => {
-          const antecedent = this.parseSimpleStatement(match[1], vars);
-          const consequent = this.parseSimpleStatement(match[2], vars);
+          const antecedent = this.parseLogicalExpression(match[1], vars);
+          const consequent = this.parseLogicalExpression(match[2], vars);
           return FormulaBuilder.relevantImplies(antecedent, consequent, match[0]);
         },
         description: "Conditional: 'If P then Q'"
@@ -91,6 +91,36 @@ export class NaturalLanguageParser {
           return FormulaBuilder.relevantImplies(antecedent, consequent, match[0]);
         },
         description: "Because: 'P because (of) Q' → Q implies P"
+      },
+
+      {
+        pattern: /^(.+) enables (.+)$/i,
+        builder: (match, vars) => {
+          const antecedent = this.parseSimpleStatement(match[1], vars);
+          const consequent = this.parseSimpleStatement(match[2], vars);
+          return FormulaBuilder.relevantImplies(antecedent, consequent, match[0]);
+        },
+        description: "Enables: 'A enables B' → A implies B"
+      },
+
+      {
+        pattern: /^(.+) is necessary for (.+)$/i,
+        builder: (match, vars) => {
+          const antecedent = this.parseSimpleStatement(match[1], vars);
+          const consequent = this.parseSimpleStatement(match[2], vars);
+          return FormulaBuilder.relevantImplies(antecedent, consequent, match[0]);
+        },
+        description: "Necessary: 'A is necessary for B' → A implies B"
+      },
+
+      {
+        pattern: /^once (.+),? then (.+)$/i,
+        builder: (match, vars) => {
+          const antecedent = this.parseSimpleStatement(match[1], vars);
+          const consequent = this.parseSimpleStatement(match[2], vars);
+          return FormulaBuilder.relevantImplies(antecedent, consequent, match[0]);
+        },
+        description: "Once-then: 'Once A, then B' → A implies B"
       },
 
       {
@@ -472,14 +502,30 @@ confidence: 1.0
       return this.parseLogicalExpression(inner, vars);
     }
     
-    // Try formal logical operators first - implication
+    // Try natural language patterns first - conjunction with "and"
+    const andMatch = trimmed.match(/^(.+)\s+and\s+(.+)$/i);
+    if (andMatch) {
+      const left = this.parseLogicalExpression(andMatch[1].trim(), vars);
+      const right = this.parseLogicalExpression(andMatch[2].trim(), vars);
+      return FormulaBuilder.and(left, right, trimmed);
+    }
+
+    // Try natural language patterns - disjunction with "or"
+    const orMatch = trimmed.match(/^(.+)\s+or\s+(.+)$/i);
+    if (orMatch) {
+      const left = this.parseLogicalExpression(orMatch[1].trim(), vars);
+      const right = this.parseLogicalExpression(orMatch[2].trim(), vars);
+      return FormulaBuilder.or(left, right, trimmed);
+    }
+
+    // Try formal logical operators - implication
     const implicationMatch = trimmed.match(/^(.+)\s*→\s*(.+)$/);
     if (implicationMatch) {
       const antecedent = this.parseLogicalExpression(implicationMatch[1].trim(), vars);
       const consequent = this.parseLogicalExpression(implicationMatch[2].trim(), vars);
       return FormulaBuilder.relevantImplies(antecedent, consequent, trimmed);
     }
-    
+
     // Try formal logical operators - conjunction
     const conjunctionMatch = trimmed.match(/^(.+)\s*∧\s*(.+)$/);
     if (conjunctionMatch) {
@@ -487,7 +533,7 @@ confidence: 1.0
       const right = this.parseLogicalExpression(conjunctionMatch[2].trim(), vars);
       return FormulaBuilder.and(left, right, trimmed);
     }
-    
+
     // Try formal logical operators - disjunction
     const disjunctionMatch = trimmed.match(/^(.+)\s*∨\s*(.+)$/);
     if (disjunctionMatch) {
