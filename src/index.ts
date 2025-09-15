@@ -11,14 +11,16 @@ import {
   Prompt,
 } from "@modelcontextprotocol/sdk/types.js";
 import { NaturalLanguageParser } from "./parser/nlp-parser.js";
-import { FormulaUtils } from "./logic/formula.js";
+import { FormulaUtils, FormulaBuilder } from "./logic/formula.js";
 import { LogicFormula, ValidationResult } from "./types.js";
 import { EvidenceModule } from "./evidence/evidence-module.js";
+import { AtomicReasonModule } from "./logic/atomic-reason.js";
 
 class RelevanceLogicServer {
   private server: Server;
   private parser: NaturalLanguageParser;
   private evidenceModule: EvidenceModule;
+  private atomicReasonModule: AtomicReasonModule;
 
   constructor() {
     this.server = new Server(
@@ -36,6 +38,7 @@ class RelevanceLogicServer {
 
     this.parser = new NaturalLanguageParser();
     this.evidenceModule = new EvidenceModule();
+    this.atomicReasonModule = new AtomicReasonModule();
     
     this.setupToolHandlers();
     this.setupPromptHandlers();
@@ -57,9 +60,13 @@ class RelevanceLogicServer {
                   description: "The explanation, argument, or reasoning task to process through relevance logic",
                 },
                 context: {
-                  type: "string", 
+                  type: "string",
                   description: "Additional context or domain information",
                   default: ""
+                },
+                previous_argument: {
+                  type: "string",
+                  description: "Optional previous version of the argument for comparison and change tracking"
                 },
               },
               required: ["task"],
@@ -224,6 +231,47 @@ class RelevanceLogicServer {
             },
           },
           {
+            name: "atomic_reason",
+            description: "Interactive logical argument validation using atom-symbol mapping to avoid text matching issues.\n\nUSAGE: Ask Claude Desktop to 'Show <argument> using AtomicReason' or 'Show <argument> using AtomicReason with evidence' (if evidence_gathering is also required).\n\nThis tool works in 3 interactive steps:\n1. extract_atoms: Identifies basic argument building blocks\n2. group_atoms: Group different ways of saying the same thing and assign symbols\n3. build_symbolic_argument: Create premises using your symbols and specify conclusion, then validate",
+            inputSchema: {
+              type: "object",
+              properties: {
+                step: {
+                  type: "string",
+                  enum: ["extract_atoms", "group_atoms", "build_symbolic_argument"],
+                  description: "Which step of the atomic reasoning process to perform"
+                },
+                argument_text: {
+                  type: "string",
+                  description: "The natural language argument to validate. Required for extract_atoms step."
+                },
+                atom_groupings: {
+                  type: "array",
+                  description: "Groups of equivalent atoms with assigned symbol names. Each group represents one concept from your argument. Example: {symbol: 'AUTH', concept_description: 'Authentication works', text_variants: ['auth implemented', 'login system ready']}. Required for build_symbolic_argument step.",
+                  items: {
+                    type: "object",
+                    properties: {
+                      symbol: { type: "string", description: "Short name for this concept (e.g., AUTH, DB_SETUP, USER_LOGIN)" },
+                      concept_description: { type: "string", description: "What this atom means in plain English" },
+                      text_variants: { type: "array", items: { type: "string" }, description: "All the different ways this concept appeared in your argument" }
+                    },
+                    required: ["symbol", "concept_description", "text_variants"]
+                  }
+                },
+                conclusion: {
+                  type: "string",
+                  description: "Which atom (symbol) you're trying to prove. Must be one of your symbols from atom_groupings. Required for build_symbolic_argument step."
+                },
+                premises: {
+                  type: "array",
+                  description: "Your argument's premises using your symbols. Format options: standalone atoms ('AUTH'), conjunctions ('AUTH && IMPL'), disjunctions ('AUTH || IMPL'), implications ('AUTH -> IMPL'), or semi-natural language ('IMPL enables AUTH'). Required for build_symbolic_argument step.",
+                  items: { type: "string", description: "One premise using your symbols" }
+                }
+              },
+              required: ["step"],
+            },
+          },
+          {
             name: "rlmcp_help",
             description: "Get guidance for RLMCP validation struggles. Provides solutions for common logical issues.",
             inputSchema: {
@@ -279,14 +327,14 @@ class RelevanceLogicServer {
 
       switch (name) {
         case "rlmcp_reason": {
-          const { task, context } = args as { task: string; context?: string };
+          const { task, context, previous_argument } = args as { task: string; context?: string; previous_argument?: string };
           
           // Step 1: Formalize the reasoning
           const formalized = this.generateFormalizationSteps(task, context || "");
           
           // Step 2: Structure into argument form
           const structured = this.parser.parseArgument(task);
-          
+
           // Check for empty premises - indicates tool misuse
           if (structured.premises.length === 0) {
             return {
@@ -297,7 +345,7 @@ text: JSON.stringify({
                   message: "❌ No premises detected. Use helper tools first:",
                   steps: [
                     "1. formalize_reasoning - convert to logical form",
-                    "2. structure_argument - organize premises/conclusion", 
+                    "2. structure_argument - organize premises/conclusion",
                     "3. rlmcp_reason - validate structured argument",
                     "If struggling: use rlmcp_help for general guidance"
                   ],
@@ -305,6 +353,24 @@ text: JSON.stringify({
                 }, null, 2)
               }]
             };
+          }
+
+          // Check for premise reduction if previous_argument provided
+          let premiseReductionWarning = null;
+          if (previous_argument) {
+            const previousStructured = this.parser.parseArgument(previous_argument);
+            if (structured.premises.length < previousStructured.premises.length) {
+              premiseReductionWarning = {
+                status: "WARNING",
+                message: "Number of premises has decreased. Please give reasons for simplifying the argument.",
+                premise_count_change: {
+                  previous: previousStructured.premises.length,
+                  current: structured.premises.length,
+                  reduction: previousStructured.premises.length - structured.premises.length
+                },
+                concern: "AI agent may be trying to cheat the system by making the argument overly general and vacuous."
+              };
+            }
           }
           
           // Step 3: Validate the logic
@@ -328,6 +394,7 @@ text: JSON.stringify({
 
           const isCircular = validation.validation_results.failures.some((f: { constraint_violated: string }) => f.constraint_violated.includes('CIRCULAR REASONING'));
 
+          // Determine base status from validation results
           if (!validation.validation_results.overallValid) {
             // Logic is invalid - must fix first
             finalStatus = "invalid";
@@ -347,6 +414,29 @@ text: JSON.stringify({
             finalNextSteps = ["✅ Use evidence_gathering if evidence needed"];
           }
 
+          // Apply premise reduction warning - prevents VALID status but preserves other errors
+          if (premiseReductionWarning) {
+            if (finalStatus === "valid") {
+              finalStatus = "warning_premise_reduction";
+              finalGuidance = "⚠️ WARNING - " + premiseReductionWarning.message + " Argument cannot achieve VALID status.";
+            } else if (finalStatus === "logically_valid_but_evidence_required") {
+              finalStatus = "warning_premise_reduction_and_evidence_required";
+              finalGuidance = "⚠️ WARNING - " + premiseReductionWarning.message + " Additionally: " + finalGuidance;
+            } else {
+              // Invalid argument + premise reduction
+              finalStatus = "invalid_with_premise_reduction_warning";
+              finalGuidance = "⚠️ WARNING - " + premiseReductionWarning.message + " Additionally: " + finalGuidance;
+            }
+
+            // Add premise reduction steps to existing next steps
+            finalNextSteps = [
+              "🚨 PREMISE REDUCTION DETECTED: Provide justification for removing premises",
+              "Explain why the simplified argument is still complete",
+              "Consider if removed premises were actually necessary",
+              ...finalNextSteps
+            ];
+          }
+
           return {
             content: [
               {
@@ -355,6 +445,7 @@ text: JSON.stringify({
                   rlmcp_analysis: {
                     original_task: task,
                     formalization_guidance: formalized,
+                    premise_reduction_warning: premiseReductionWarning,
                     structured_argument: {
                       premises: structured.premises.map(p => p.originalText),
                       conclusion: structured.conclusion.originalText
@@ -718,6 +809,116 @@ text: JSON.stringify({
           };
         }
 
+        case "atomic_reason": {
+          const { step, argument_text, atom_groupings, premises, conclusion } = args as {
+            step: "extract_atoms" | "group_atoms" | "build_symbolic_argument";
+            argument_text?: string;
+            atom_groupings?: Array<{symbol: string, concept_description: string, text_variants: string[]}>;
+            premises?: string[];
+            conclusion?: string;
+          };
+
+          switch (step) {
+            case "extract_atoms": {
+              if (!argument_text) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                      error: "MISSING_ARGUMENT_TEXT",
+                      message: "argument_text is required for extract_atoms step"
+                    }, null, 2)
+                  }]
+                };
+              }
+
+              const extractedAtoms = this.atomicReasonModule.extractAtomsFromText(argument_text, this.parser);
+
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    step: "extract_atoms",
+                    extracted_atoms: extractedAtoms,
+                    next_step: "group_atoms",
+                    instruction: "Review the extracted atoms above. Group different ways of saying the same thing and assign each group a short symbol name (like AUTH for authentication). Use step='group_atoms' to continue.",
+                    example_grouping_task: "If you see 'implement auth' and 'authentication works', decide if these are the same thing, then group them with symbol 'AUTH'.",
+                    example_grouping: [
+                      {
+                        symbol: "AUTH_IMPL",
+                        concept_description: "User authentication is implemented",
+                        text_variants: ["implement authentication", "authentication implementation"]
+                      }
+                    ]
+                  }, null, 2)
+                }]
+              };
+            }
+
+            case "group_atoms": {
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    step: "group_atoms",
+                    instruction: "Now create your argument using your symbols. Specify which atom you're trying to prove (conclusion) and what premises support it.",
+                    premise_formats: [
+                      "Standalone: 'AUTH'",
+                      "Conjunctions: 'AUTH && IMPL'",
+                      "Disjunctions: 'AUTH || IMPL'",
+                      "Implications: 'AUTH -> IMPL'",
+                      "Semi-natural: 'IMPL enables AUTH'"
+                    ],
+                    task: "Create premises array and choose conclusion atom using your exact symbol names.",
+                    next_step: "Use step='build_symbolic_argument' with your atom_groupings, premises, and conclusion",
+                    required_fields: ["atom_groupings", "premises", "conclusion"]
+                  }, null, 2)
+                }]
+              };
+            }
+
+            case "build_symbolic_argument": {
+              if (!atom_groupings || !premises || !conclusion) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                      error: "MISSING_REQUIRED_FIELDS",
+                      message: "atom_groupings, premises, and conclusion are required for build_symbolic_argument step",
+                      required_format: {
+                        atom_groupings: "Array of {symbol, concept_description, text_variants}",
+                        premises: "Array of strings like 'AUTH', 'AUTH && IMPL', 'AUTH -> IMPL', 'IMPL enables AUTH'",
+                        conclusion: "String matching one of your symbols"
+                      }
+                    }, null, 2)
+                  }]
+                };
+              }
+
+              // Build symbolic argument and validate
+              const symbolicValidation = this.atomicReasonModule.validateSymbolicArgument(atom_groupings, premises, conclusion);
+
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify(symbolicValidation, null, 2)
+                }]
+              };
+            }
+
+            default:
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    error: "INVALID_STEP",
+                    message: "step must be 'extract_atoms', 'group_atoms', or 'build_symbolic_argument'"
+                  }, null, 2)
+                }]
+              };
+          }
+        }
+
         case "rlmcp_help": {
           const { struggling_with } = args as { struggling_with?: string };
 
@@ -951,6 +1152,22 @@ text: JSON.stringify({
                 required: true
               }
             ]
+          },
+          {
+            name: "atomic_reasoning_guide",
+            description: "Guide for using AtomicReason when text matching fails",
+            arguments: [
+              {
+                name: "argument",
+                description: "Argument to validate using atom-symbol mapping",
+                required: true
+              },
+              {
+                name: "include_evidence",
+                description: "Whether to include evidence gathering (true/false)",
+                required: false
+              }
+            ]
           }
         ] satisfies Prompt[],
       };
@@ -1006,7 +1223,41 @@ Do this validation transparently, then present the improved reasoning.`
             ]
           };
         }
-        
+
+        case "atomic_reasoning_guide": {
+          const { argument, include_evidence } = args as { argument: string; include_evidence?: string };
+          const needsEvidence = include_evidence === "true";
+
+          return {
+            description: "AtomicReason workflow guide for text matching issues",
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `Show "${argument}" using AtomicReason${needsEvidence ? " with evidence" : ""}
+
+WORKFLOW:
+1. Use atomic_reason with step="extract_atoms" and argument_text="${argument}"
+2. Review extracted atoms and group equivalent concepts
+3. Use atomic_reason with step="group_atoms" to get guidance on grouping
+4. Use atomic_reason with step="build_symbolic_argument" with your atom_groupings, logical_relationships, and conclusion_symbol
+${needsEvidence ? "5. Use evidence_gathering to provide evidence for each atom and implication" : ""}
+
+PURPOSE: AtomicReason avoids Claude Desktop's text matching failures by working with symbols instead of exact phrases.
+
+EXAMPLE GROUPING:
+{
+  "symbol": "AUTH_IMPL",
+  "concept_description": "User authentication is implemented",
+  "text_variants": ["implement authentication", "authentication implementation", "auth is complete"]
+}`
+                }
+              }
+            ]
+          };
+        }
+
         default:
           throw new Error(`Unknown prompt: ${name}`);
       }
@@ -1751,6 +2002,7 @@ Do this validation transparently, then present the improved reasoning.`
       implications: step_relationships
     };
   }
+
 
   async run(): Promise<void> {
     const transport = new StdioServerTransport();
