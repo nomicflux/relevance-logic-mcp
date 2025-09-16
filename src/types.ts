@@ -53,12 +53,6 @@ export interface ParsedStatement {
 
 // Validation Semantics
 
-export interface RelevanceContext {
-  sharedAtoms: LogicFormula[];              // Exact atomic formulas that establish relevance
-  informationFlow: 'direct' | 'mediated';  // How information flows between source and target
-  relevanceStrength: number;                // 0-1 measure of connection strength
-}
-
 export interface ValidationResult {
   isValid: boolean;
   violatedConstraints: string[];

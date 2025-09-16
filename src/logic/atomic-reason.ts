@@ -136,6 +136,52 @@ export class AtomicReasonModule {
     return formula.naturalLanguage || 'unknown';
   }
 
+  private generateNaturalLanguageArgument(
+    premiseFormulas: LogicFormula[],
+    conclusionFormula: LogicFormula,
+    atom_groupings: Array<{symbol: string, concept_description: string, text_variants: string[]}>
+  ): { premises: string[], conclusion: string, full_argument: string } {
+    // Create symbol to description mapping
+    const symbolToDescription = new Map<string, string>();
+    atom_groupings.forEach(group => {
+      symbolToDescription.set(group.symbol, group.concept_description);
+    });
+
+    // Convert premise formulas to natural language
+    const naturalLanguagePremises = premiseFormulas.map(formula =>
+      this.formulaToNaturalLanguage(formula, symbolToDescription)
+    );
+
+    // Convert conclusion formula to natural language
+    const naturalLanguageConclusion = this.formulaToNaturalLanguage(conclusionFormula, symbolToDescription);
+
+    // Create full argument text
+    const fullArgument = naturalLanguagePremises.join('. ') + '. Therefore, ' + naturalLanguageConclusion + '.';
+
+    return {
+      premises: naturalLanguagePremises,
+      conclusion: naturalLanguageConclusion,
+      full_argument: fullArgument
+    };
+  }
+
+  private formulaToNaturalLanguage(formula: LogicFormula, symbolToDescription: Map<string, string>): string {
+    if (formula.type === 'atomic') {
+      return symbolToDescription.get(formula.predicate || '') || formula.predicate || 'unknown';
+    } else if (formula.type === 'compound' && formula.subformulas) {
+      const left = this.formulaToNaturalLanguage(formula.subformulas[0], symbolToDescription);
+      const right = this.formulaToNaturalLanguage(formula.subformulas[1], symbolToDescription);
+
+      switch (formula.operator) {
+        case 'implies': return `${left} implies ${right}`;
+        case 'and': return `${left} and ${right}`;
+        case 'or': return `${left} or ${right}`;
+        default: return `${left} ${formula.operator} ${right}`;
+      }
+    }
+    return formula.naturalLanguage || 'unknown';
+  }
+
   validateSymbolicArgument(
     atom_groupings: Array<{symbol: string, concept_description: string, text_variants: string[]}>,
     premises: string[],
@@ -235,6 +281,15 @@ export class AtomicReasonModule {
       if (ignoredPremises.length > 0) {
         result.ignored_premises = ignoredPremises;
         result.message = `${ignoredPremises.length} premise(s) were ignored:\n${ignoredPremises.join('\n')}\n\nOnly symbols from atom_groupings can be used. If you need new symbols, use earlier steps to produce them.`;
+      }
+
+      // If validation is successful, generate natural language output
+      if (validation.isValid) {
+        result.natural_language_argument = this.generateNaturalLanguageArgument(
+          premiseFormulas,
+          conclusionFormula,
+          atom_groupings
+        );
       }
 
       return result;

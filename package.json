@@ -1,7 +1,7 @@
 {
-  "name": "relevance-logic-mcp",
-  "version": "2.0.0",
-  "description": "MCP server for relevance logic operations",
+  "name": "atomic-logic-mcp",
+  "version": "3.0.0",
+  "description": "MCP server for building logically rigorous arguments using atomic reasoning",
   "main": "build/index.js",
   "type": "module",
   "scripts": {
@@ -15,7 +15,7 @@
     "validate-system-r": "npm run build && npm run test",
     "system-r-compliance": "npm run build && npm run test test/system-r-complete.test.ts"
   },
-  "keywords": ["mcp", "server", "relevance", "logic"],
+  "keywords": ["mcp", "server", "logic", "planning", "evidence", "arguments"],
   "author": "",
   "license": "MIT",
   "dependencies": {

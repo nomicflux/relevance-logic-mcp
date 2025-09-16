@@ -1,82 +1,89 @@
-# Logical Argument Validator MCP Server
+# Atomic Reason MCP Server
 
-A Model Context Protocol (MCP) server for validating logical arguments and analyzing their structure. Provides binary validation (VALID/INVALID) with detailed failure analysis, designed to identify disconnected premises and structural issues in arguments.
+A Model Context Protocol (MCP) server for building logically rigorous arguments using atomic reasoning. Solves Claude Desktop's text matching issues by using symbolic atom-based validation with connected component analysis.
 
 ## Overview
 
-This MCP server validates the logical structure of natural language arguments using connected component analysis. It checks whether all premises are logically connected to the conclusion and identifies unused or irrelevant premises that should be removed.
+This MCP server validates logical arguments through a three-step atomic reasoning process that eliminates text matching failures. Instead of relying on exact phrase matching, it uses symbolic atoms to represent concepts, making argument validation more reliable and accessible.
 
 ## Key Features
 
+- **Atomic Reasoning Workflow**: Extract atoms → Group concepts → Build symbolic arguments
+- **Text Matching Solution**: Uses symbols instead of exact phrases to avoid Claude Desktop matching failures
 - **Connected Component Validation**: Ensures all premises connect to the conclusion through shared predicates
-- **Binary Validation**: Strict VALID/INVALID results with detailed failure explanations
-- **Natural Language Parsing**: Converts natural language to formal logical structure, including causal statements with "because"
-- **Gap Analysis**: Identifies structural issues, missing premises, and quantifier problems
-- **Evidence Integration**: Tracks evidence requirements for empirical claims
-- **Circular Reasoning Detection**: Identifies when conclusions appear as premises
+- **Evidence Integration**: Tracks evidence requirements for both atoms and logical relationships
+- **Interactive Three-Step Process**: Guides users through atom extraction, grouping, and symbolic argument construction
+- **Natural Language Output**: Converts validated symbolic arguments back to readable natural language
 
 ## Usage with Claude Desktop
 
-### Simple Usage (Recommended)
-Tell Claude Desktop: **"Validate this argument"**
+### Primary Workflow: Atomic Reasoning
+
+Tell Claude Desktop: **"Show [argument] using atomic reasoning"**
 
 Claude will automatically:
-1. Parse the argument into formal logical structure
-2. Check if all premises connect to the conclusion
-3. Identify disconnected or unused premises
-4. Return VALID/INVALID with specific failure reasons
+1. Extract atomic building blocks from your argument
+2. Help you group related concepts under symbols
+3. Build and validate the symbolic argument structure
+4. Provide evidence requirements if needed
 
-### Example
+### Example Workflow
 ```
-User: "Validate this argument: All humans are mortal. Socrates is human. Therefore, Socrates is mortal."
+User: "Show that C++ is better than PHP for performance using atomic reasoning"
 
-Response: VALID
-- All premises are in the same connected component as the conclusion
-- Proper predicate sharing between premises and conclusion
+Step 1 - Extract Atoms:
+→ atomic_reason(step="extract_atoms", argument_text="...")
+Result: ["C++ is compiled", "PHP is interpreted", "compiled languages execute faster", ...]
 
-User: "Validate this argument: The moon is cheese. Therefore, it's raining."
+Step 2 - Group Atoms:
+→ atomic_reason(step="group_atoms", ...)
+Guidance: Group related concepts like "CPP_COMPILED", "PHP_INTERPRETED", "FASTER_EXECUTION"
 
-Response: INVALID
-- Premise "moon is cheese" is disconnected from conclusion "it's raining"
-- No shared predicates between premise and conclusion
-- Remove disconnected premises
+Step 3 - Build Argument:
+→ atomic_reason(step="build_symbolic_argument",
+    atom_groupings=[...],
+    premises=["CPP_COMPILED", "CPP_COMPILED -> FASTER_EXECUTION"],
+    conclusion="FASTER_EXECUTION")
+Result: VALID + natural language output
 ```
 
 ## How It Works
 
-The server validates arguments by:
+The server validates arguments through atomic reasoning:
 
-1. **Parsing Natural Language**: Converts statements to formal logical structure
-2. **Connected Component Analysis**: Groups formulas that share predicates
-3. **Validation Check**: Ensures all premises are in the same component as the conclusion
-4. **Gap Analysis**: Identifies structural problems and missing elements
-5. **Evidence Tracking**: Manages evidence requirements for empirical claims
+1. **Atom Extraction**: Splits text on periods/newlines and uses the logic parser to extract atomic building blocks
+2. **Concept Grouping**: Groups related atoms under symbolic names (e.g., "AUTH_IMPL", "DATABASE_CONFIG")
+3. **Symbolic Validation**: Uses symbols to build logical relationships and validates using connected component analysis
+4. **Natural Language Generation**: Converts validated symbolic arguments back to readable form
 
-### Parsing Features
-
-- **Causal Statements**: "X because Y" → "Y implies X"
-- **Conditionals**: "if X then Y", "X implies Y"
-- **Quantifiers**: "all X are Y", "some X are Y"
-- **Logical Connectives**: and, or, not, implies
-- **Formal Logic**: P(x) → Q(y), ∀x(P(x)), etc.
+### Supported Premise Formats
+```
+- Standalone: "AUTH" → atomic(AUTH)
+- Conjunction: "AUTH && CONFIG" → and(AUTH, CONFIG)
+- Disjunction: "AUTH || CONFIG" → or(AUTH, CONFIG)
+- Implication: "AUTH -> READY" → implies(AUTH, READY)
+- UNKNOWN: "AUTH enables READY" → implies(AUTH, READY)
+```
 
 ### Validation Examples
 
-❌ **INVALID**: "Dogs are animals. Therefore, it's Tuesday."
-- No shared predicates between premise and conclusion
-- Premise is disconnected from conclusion
+❌ **INVALID**: Undefined symbols
+```
+Ignored premise 'CPP_FAST && BETTER -> SUPERIOR' because 'SUPERIOR' is not a defined atom.
+Use only symbols from your atom_groupings: CPP_FAST, BETTER.
+```
 
-❌ **INVALID**: "P(x). Q(y). Therefore, R(z)."
-- All formulas use different predicates
-- Multiple disconnected components
+✅ **VALID**: All symbols defined and connected
+```
+Symbolic Argument:
+P1: CPP_COMPILED
+P2: CPP_COMPILED → FASTER_EXECUTION
+C: FASTER_EXECUTION
 
-✅ **VALID**: "All humans are mortal. Socrates is human. Therefore, Socrates is mortal."
-- Shared predicates: "human", "mortal"
-- All premises connect to conclusion
-
-✅ **VALID**: "It rains because clouds are heavy. Therefore, clouds are heavy implies it rains."
-- Causal statement parsed correctly
-- Proper logical structure maintained
+Natural Language:
+C++ is a compiled language. C++ is a compiled language implies faster execution.
+Therefore, faster execution.
+```
 
 ## Setup
 
@@ -102,10 +109,10 @@ Add to your Claude Desktop MCP configuration:
 ```json
 {
   "mcpServers": {
-    "relevance-logic-mcp": {
+    "atomic-logic-mcp": {
       "command": "node",
-      "args": ["/path/to/relevance-logic-mcp/build/index.js"],
-      "cwd": "/path/to/relevance-logic-mcp"
+      "args": ["/path/to/atomic-logic-mcp/build/index.js"],
+      "cwd": "/path/to/atomic-logic-mcp"
     }
   }
 }
@@ -113,56 +120,79 @@ Add to your Claude Desktop MCP configuration:
 
 ## Available Tools
 
-### Primary Tool: `rlmcp_reason`
-The main tool that handles all logical argument validation transparently. Takes any reasoning task and automatically:
-- Parses natural language into formal logical structure
-- Validates connected component requirements
-- Identifies disconnected premises
-- Reports specific validation failures
+### Primary Tool: `atomic_reason`
+The main tool with three interactive steps:
 
-### Advanced Tools (for explicit use)
-- `validate_argument`: Check argument validity using connected component analysis
-- `structure_argument`: Transform arguments into clear logical structure
-- `formalize_reasoning`: Convert natural language to formal logic representation
-- `diagnose_gaps`: Identify structural issues in arguments
-- `parse_statement`: Parse natural language statements into logical formulas
-- `check_relevance`: Verify predicate sharing between premises and conclusion
+**Step 1: Extract Atoms**
+```json
+{
+  "step": "extract_atoms",
+  "argument_text": "Your natural language argument"
+}
+```
+
+**Step 2: Group Atoms**
+```json
+{
+  "step": "group_atoms",
+  "extracted_atoms": ["atom1", "atom2", ...],
+  "guidance_request": "help with grouping"
+}
+```
+
+**Step 3: Build Symbolic Argument**
+```json
+{
+  "step": "build_symbolic_argument",
+  "atom_groupings": [{"symbol": "AUTH", "concept_description": "...", "text_variants": [...]}],
+  "premises": ["AUTH", "AUTH -> READY"],
+  "conclusion": "READY"
+}
+```
+
+### Supporting Tools
+- **`evidence_gathering`**: Validate evidence for atoms and implications (requires atomic_reason output)
+- **`prepare_logical_plan`**: Create implementation plans for atomic_reason validation
+- **`parse_statement`**: Parse individual statements into logical formulas
+- **`validate_argument`**: Direct validation using natural language (for comparison)
+- **`structure_argument`**: Transform arguments into clear logical structure
+- **`diagnose_gaps`**: Identify structural issues in arguments
 
 ## Implementation
 
-The server validates logical arguments using connected component analysis:
+The server uses atomic reasoning to solve text matching problems:
 
-- **Connected Component Validation**: All premises must connect to conclusion through shared predicates
-- **Predicate Sharing**: Formulas are connected when they share at least one predicate
-- **Circular Reasoning Detection**: Prevents premises from being identical to conclusions
-- **Quantifier Scope Handling**: Manages variable binding in quantified statements
-- **Natural Language Parsing**: Converts statements to formal logic, including causal "because" patterns
+- **Symbol-Based Validation**: Uses symbolic atoms instead of exact text matching
+- **Connected Component Analysis**: All premises must connect to conclusion through shared predicates
+- **Flexible Input Formats**: Supports both symbolic notation and natural language patterns
+- **Evidence Requirements**: Tracks evidence needs for both atomic concepts and logical relationships
+- **Natural Language Output**: Converts validated symbolic arguments back to readable form
 
-**Binary Validation**: Arguments are either VALID (all premises connected to conclusion) or INVALID (with specific failure reasons).
+**Three-Step Process**: Extract atoms → Group concepts → Validate symbolic structure
 
 ## Benefits for AI Reasoning
 
-- **Prevents Invalid Inferences**: Requires explicit logical connections between premises and conclusions
-- **Identifies Irrelevant Premises**: Detects premises that don't contribute to the argument
-- **Structural Analysis**: Reveals gaps and issues in argument construction
-- **Clear Feedback**: Provides specific reasons when arguments fail validation
-- **Formal Rigor**: Ensures conclusions actually follow from connected premises
+- **Eliminates Text Matching Failures**: Uses symbols instead of exact phrase matching
+- **Maintains Logical Rigor**: Connected component validation pushes agents to explicitly specify connections between all parts of the argument
+- **Interactive Guidance**: Helps users through each step of argument construction
+- **Clear Error Messages**: Specific feedback about undefined symbols and structural issues
+- **Evidence Integration**: Seamless evidence gathering for validated arguments
+- **Accessible to Non-Experts**: No logic background required to use effectively
 
 ## Testing
 
 The implementation has comprehensive test coverage:
 
 ### Test Coverage
-- **Unit Tests**: All core validation functions individually tested
-- **Integration Tests**: End-to-end argument validation scenarios
-- **Connected Component Tests**: Predicate sharing and component analysis
-- **Quantifier Scope Tests**: Variable binding and scope detection
-- **Natural Language Tests**: "Because" pattern parsing and conversion
-- **Circular Reasoning Tests**: Detection of premises identical to conclusions
+- **Atomic Reason Tests**: All three steps individually tested
+- **Symbol Extraction Tests**: Parser integration and atom collection
+- **Validation Tests**: Connected component analysis and circular reasoning detection
+- **Evidence Integration Tests**: End-to-end evidence gathering workflow
+- **Natural Language Tests**: Conversion between symbolic and natural language forms
 
 ### Run Tests
 ```bash
-npm test           # Run all tests
+npm test           # Run all tests (79 tests)
 npm run build      # Build TypeScript to JavaScript
 npm start          # Start the MCP server
 ```
@@ -177,4 +207,4 @@ npm run build  # Production build
 
 ## Version
 
-**2.0.0** - Connected component argument validation with natural language parsing
+**3.0.0** - Atomic reasoning with symbol-based validation, connected component analysis, and evidence integration

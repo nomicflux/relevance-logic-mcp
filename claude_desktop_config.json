@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "relevance-logic": {
+    "atomic-logic": {
       "command": "node",
-      "args": ["/Users/demouser/Code/relevance-logic-mcp/build/index.js"],
+      "args": ["/Users/demouser/Code/atomic-logic-mcp/build/index.js"],
       "env": {}
     }
   }

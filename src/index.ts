@@ -16,7 +16,7 @@ import { LogicFormula, ValidationResult } from "./types.js";
 import { EvidenceModule } from "./evidence/evidence-module.js";
 import { AtomicReasonModule } from "./logic/atomic-reason.js";
 
-class RelevanceLogicServer {
+class AtomicLogicServer {
   private server: Server;
   private parser: NaturalLanguageParser;
   private evidenceModule: EvidenceModule;
@@ -25,7 +25,7 @@ class RelevanceLogicServer {
   constructor() {
     this.server = new Server(
       {
-        name: "relevance-logic-mcp",
+        name: "atomic-logic-mcp",
         version: "2.0.0",
       },
       {
@@ -49,29 +49,6 @@ class RelevanceLogicServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
-          {
-            name: "rlmcp_reason",
-            description: "Construct logically rigorous arguments using relevance logic. Validates premise-conclusion connections and identifies logical gaps.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                task: {
-                  type: "string",
-                  description: "The explanation, argument, or reasoning task to process through relevance logic",
-                },
-                context: {
-                  type: "string",
-                  description: "Additional context or domain information",
-                  default: ""
-                },
-                previous_argument: {
-                  type: "string",
-                  description: "Optional previous version of the argument for comparison and change tracking"
-                },
-              },
-              required: ["task"],
-            },
-          },
           {
             name: "parse_statement",
             description: "Parse natural language into formal logical structure",
@@ -98,25 +75,6 @@ class RelevanceLogicServer {
                 },
               },
               required: ["argument"],
-            },
-          },
-          {
-            name: "check_relevance",
-            description: "[HELPER TOOL] Check premise-conclusion relevance. User-requested only.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                premises: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "Premise statements",
-                },
-                conclusion: {
-                  type: "string",
-                  description: "Conclusion statement",
-                },
-              },
-              required: ["premises", "conclusion"],
             },
           },
           {
@@ -177,9 +135,9 @@ class RelevanceLogicServer {
             inputSchema: {
               type: "object",
               properties: {
-                rlmcp_output: {
+                atomic_reason_output: {
                   type: "string",
-                  description: "rlmcp_reason JSON output"
+                  description: "atomic_reason JSON output from build_symbolic_argument step"
                 },
                 evidence_items: {
                   type: "array",
@@ -196,12 +154,12 @@ class RelevanceLogicServer {
                   }
                 }
               },
-              required: ["rlmcp_output", "evidence_items"],
+              required: ["atomic_reason_output", "evidence_items"],
             },
           },
           {
             name: "prepare_logical_plan",
-            description: "Create a logical plan structure for validation with RLMCP. Triggered by 'Plan to do X using RLMCP'. The argument you create IS the implementation plan. REQUIREMENTS: Each premise must be a specific, actionable implementation step. You must specify how steps relate to each other. Each implication must show the logical dependency between concrete steps. The conclusion should only be reachable through the chain of specific implementation steps.",
+            description: "Create a logical plan structure for validation with atomic_reason. Triggered by 'Plan to do X using atomic reasoning'. The argument you create IS the implementation plan. REQUIREMENTS: Each premise must be a specific, actionable implementation step. You must specify how steps relate to each other. Each implication must show the logical dependency between concrete steps. The conclusion should only be reachable through the chain of specific implementation steps.",
             inputSchema: {
               type: "object",
               properties: {
@@ -272,7 +230,7 @@ class RelevanceLogicServer {
             },
           },
           {
-            name: "rlmcp_help",
+            name: "atomic_help",
             description: "Get guidance for RLMCP validation struggles. Provides solutions for common logical issues.",
             inputSchema: {
               type: "object",
@@ -326,148 +284,6 @@ class RelevanceLogicServer {
       const { name, arguments: args } = request.params;
 
       switch (name) {
-        case "rlmcp_reason": {
-          const { task, context, previous_argument } = args as { task: string; context?: string; previous_argument?: string };
-          
-          // Step 1: Formalize the reasoning
-          const formalized = this.generateFormalizationSteps(task, context || "");
-          
-          // Step 2: Structure into argument form
-          const structured = this.parser.parseArgument(task);
-
-          // Check for empty premises - indicates tool misuse
-          if (structured.premises.length === 0) {
-            return {
-              content: [{
-                type: "text",
-text: JSON.stringify({
-                  error: "NO_PREMISES_FOUND",
-                  message: "❌ No premises detected. Use helper tools first:",
-                  steps: [
-                    "1. formalize_reasoning - convert to logical form",
-                    "2. structure_argument - organize premises/conclusion",
-                    "3. rlmcp_reason - validate structured argument",
-                    "If struggling: use rlmcp_help for general guidance"
-                  ],
-                  need: "Format: 'Premise 1: ... Conclusion: ...'"
-                }, null, 2)
-              }]
-            };
-          }
-
-          // Check for premise reduction if previous_argument provided
-          let premiseReductionWarning = null;
-          if (previous_argument) {
-            const previousStructured = this.parser.parseArgument(previous_argument);
-            if (structured.premises.length < previousStructured.premises.length) {
-              premiseReductionWarning = {
-                status: "WARNING",
-                message: "Number of premises has decreased. Please give reasons for simplifying the argument.",
-                premise_count_change: {
-                  previous: previousStructured.premises.length,
-                  current: structured.premises.length,
-                  reduction: previousStructured.premises.length - structured.premises.length
-                },
-                concern: "AI agent may be trying to cheat the system by making the argument overly general and vacuous."
-              };
-            }
-          }
-          
-          // Step 3: Validate the logic
-          const validation = this.strictValidation(
-            structured.premises.map(p => p.formula),
-            structured.conclusion.formula
-          );
-          
-          // Step 4: If invalid, diagnose gaps
-          let gapAnalysis = null;
-          if (!validation.validation_results.overallValid) {
-            gapAnalysis = this.diagnoseLogicalGaps(task);
-          }
-          
-          // Check if evidence is required based on task wording
-          const evidenceRequired = /with evidence|using evidence|including evidence/i.test(task);
-
-          let finalStatus = "invalid";
-          let finalGuidance = "";
-          let finalNextSteps: string[] = [];
-
-          const isCircular = validation.validation_results.failures.some((f: { constraint_violated: string }) => f.constraint_violated.includes('CIRCULAR REASONING'));
-
-          // Determine base status from validation results
-          if (!validation.validation_results.overallValid) {
-            // Logic is invalid - must fix first
-            finalStatus = "invalid";
-            finalGuidance = isCircular ?
-              "❌ CIRCULAR REASONING - you're not being explicit about your intuitions and domain knowledge. Make implicit assumptions into explicit premises." :
-              "❌ INVALID - argument rejected. Must fix logical structure before proceeding. Use rlmcp_help if struggling.";
-            finalNextSteps = this.generateSpecificNextSteps(gapAnalysis, structured);
-          } else if (evidenceRequired) {
-            // Logic is valid but evidence is required - argument not complete until evidence gathering succeeds
-            finalStatus = "logically_valid_but_evidence_required";
-            finalGuidance = "✅ Logic is valid but evidence required. Argument NOT COMPLETE until evidence_gathering succeeds for all atoms and implications.";
-            finalNextSteps = ["🚨 REQUIRED: Use evidence_gathering tool to provide evidence for all atoms and implications before argument is considered complete"];
-          } else {
-            // Logic is valid and no evidence required - complete
-            finalStatus = "valid";
-            finalGuidance = "✅ Valid - ready for use";
-            finalNextSteps = ["✅ Use evidence_gathering if evidence needed"];
-          }
-
-          // Apply premise reduction warning - prevents VALID status but preserves other errors
-          if (premiseReductionWarning) {
-            if (finalStatus === "valid") {
-              finalStatus = "warning_premise_reduction";
-              finalGuidance = "⚠️ WARNING - " + premiseReductionWarning.message + " Argument cannot achieve VALID status.";
-            } else if (finalStatus === "logically_valid_but_evidence_required") {
-              finalStatus = "warning_premise_reduction_and_evidence_required";
-              finalGuidance = "⚠️ WARNING - " + premiseReductionWarning.message + " Additionally: " + finalGuidance;
-            } else {
-              // Invalid argument + premise reduction
-              finalStatus = "invalid_with_premise_reduction_warning";
-              finalGuidance = "⚠️ WARNING - " + premiseReductionWarning.message + " Additionally: " + finalGuidance;
-            }
-
-            // Add premise reduction steps to existing next steps
-            finalNextSteps = [
-              "🚨 PREMISE REDUCTION DETECTED: Provide justification for removing premises",
-              "Explain why the simplified argument is still complete",
-              "Consider if removed premises were actually necessary",
-              ...finalNextSteps
-            ];
-          }
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  rlmcp_analysis: {
-                    original_task: task,
-                    formalization_guidance: formalized,
-                    premise_reduction_warning: premiseReductionWarning,
-                    structured_argument: {
-                      premises: structured.premises.map(p => p.originalText),
-                      conclusion: structured.conclusion.originalText
-                    },
-                    validation_results: {
-                      ...validation.validation_results,
-                      overallValid: evidenceRequired ? false : validation.validation_results.overallValid,
-                      finalStatus: finalStatus
-                    },
-                    evidence_required: evidenceRequired,
-                    gap_analysis: gapAnalysis,
-                    guidance: finalGuidance,
-                    next_steps: finalNextSteps,
-                    recommendations: gapAnalysis?.recommendations || [
-                      "All premises are in the same connected component as the conclusion"
-                    ]
-                  }
-                }, null, 2)
-              }
-            ]
-          };
-        }
         
         case "parse_statement": {
           const { statement } = args as { statement: string };
@@ -510,7 +326,7 @@ text: JSON.stringify({
                     "1. formalize_reasoning",
                     "2. structure_argument", 
                     "3. validate_argument",
-                    "If struggling: use rlmcp_help for guidance"
+                    "If struggling: use atomic_help for guidance"
                   ],
                   need: "Format: 'Premise 1: ... Conclusion: ...'"
                 }, null, 2)
@@ -537,7 +353,7 @@ text: JSON.stringify({
               "✅ Valid" :
               validation.validation_results.failures.some((f: { constraint_violated: string }) => f.constraint_violated.includes('CIRCULAR REASONING')) ?
                 "❌ Circular reasoning - make implicit assumptions explicit" :
-                "❌ Invalid - fix logical structure. Use rlmcp_help if needed.",
+                "❌ Invalid - fix logical structure. Use atomic_help if needed.",
             next_steps: validation.validation_results.overallValid ?
               ["✅ Valid and ready"] :
               this.generateSpecificNextSteps(gapAnalysis, this.parser.parseArgument(argument))
@@ -553,30 +369,13 @@ text: JSON.stringify({
           };
         }
 
-        case "check_relevance": {
-          const { premises, conclusion } = args as { premises: string[], conclusion: string };
-          
-          const parsedPremises = premises.map(p => this.parser.parse(p).formula);
-          const parsedConclusion = this.parser.parse(conclusion).formula;
-          
-          // Sharing analysis removed - only connected/disconnected matters
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({ message: "Sharing analysis removed - only connected/disconnected validation remains" }, null, 2),
-              },
-            ],
-          };
-        }
 
         case "structure_argument": {
           const { argument, context = "" } = args as { argument: string, context?: string };
           
           const structuredAnalysis = this.structureArgument(argument, context);
           
-          // Check if the structured argument has potential issues and provide specific guidance
-          const structuralIssues = structuredAnalysis.relevancePreCheck?.potentialIssues || [];
+          // Provide guidance for argument structure
           
           // Add atomic formula examples and specific next steps
           const enhancedAnalysis = {
@@ -584,12 +383,8 @@ text: JSON.stringify({
             examples: [
               "mammal(dolphin)", "warm_blooded(x)", "larger(elephant,mouse)"
             ],
-            guidance: structuralIssues.length > 0 ?
-              "⚠️ Potential issues - review below" :
-              "✅ Structure looks good",
-            next_steps: structuralIssues.length > 0 ?
-              this.generateStructuralNextSteps(structuralIssues, structuredAnalysis) :
-              ["Run rlmcp_reason to validate"]
+            guidance: "✅ Structure looks good",
+            next_steps: ["Run atomic_reason to validate"]
           };
           
           return {
@@ -633,8 +428,8 @@ text: JSON.stringify({
         }
         
         case "evidence_gathering": {
-          const { rlmcp_output, evidence_items } = args as {
-            rlmcp_output: string;
+          const { atomic_reason_output, evidence_items } = args as {
+            atomic_reason_output: string;
             evidence_items: Array<{
               target: string;
               summary: string;
@@ -644,33 +439,36 @@ text: JSON.stringify({
           };
 
           try {
-            // Parse the rlmcp_reason output
-            const rlmcpAnalysis = JSON.parse(rlmcp_output);
+            // Parse the atomic_reason output
+            const atomicReasonAnalysis = JSON.parse(atomic_reason_output);
 
-            if (!rlmcpAnalysis.rlmcp_analysis) {
-              throw new Error("Input must be valid JSON output from rlmcp_reason tool");
+            if (!atomicReasonAnalysis.validation_result || !atomicReasonAnalysis.symbolic_argument) {
+              throw new Error("Input must be valid JSON output from atomic_reason build_symbolic_argument step");
             }
 
-            const analysis = rlmcpAnalysis.rlmcp_analysis;
-
-            // Extract structured argument to find all atoms and implications
-            const structured = this.parser.parseArgument(analysis.original_task);
-            const allFormulas = [...structured.premises.map((p: any) => p.formula), structured.conclusion.formula];
+            // Extract atoms and implications from atomic_reason output
+            const symbolicArgument = atomicReasonAnalysis.symbolic_argument;
+            const atomGroupings = atomicReasonAnalysis.atom_groupings || [];
 
             // Find all atoms and implications that need evidence
             const atomsNeededEvidence = new Set<string>();
             const implicationsNeededEvidence = new Set<string>();
 
-            allFormulas.forEach((formula: LogicFormula) => {
-              const atoms = FormulaUtils.extractAtomicFormulas(formula);
-              atoms.forEach(atom => {
-                atomsNeededEvidence.add(FormulaUtils.toString(atom));
-              });
-
-              if (formula.type === 'compound' && formula.operator === 'implies') {
-                implicationsNeededEvidence.add(FormulaUtils.toString(formula));
-              }
+            // Add all atoms from atom_groupings (use concept_description as the evidence target)
+            atomGroupings.forEach((group: any) => {
+              atomsNeededEvidence.add(group.concept_description);
             });
+
+            // Add all premises as implications needing evidence (use the symbolic form)
+            if (symbolicArgument && symbolicArgument.premises) {
+              symbolicArgument.premises.forEach((premise: string) => {
+                const cleanPremise = premise.replace(/^P\d+:\s*/, '');
+                // Only add compound formulas (implications, conjunctions, disjunctions) as needing evidence
+                if (cleanPremise.includes('→') || cleanPremise.includes('∧') || cleanPremise.includes('∨')) {
+                  implicationsNeededEvidence.add(cleanPremise);
+                }
+              });
+            }
 
             // Check if every atom and implication has complete enhanced evidence
             const missingEvidence: string[] = [];
@@ -728,11 +526,11 @@ text: JSON.stringify({
                     },
                     next_steps: allEvidenceComplete ?
                       (hasConflicts ?
-                        ["1. Analyze the contradictory evidence above", "2. Decide: revise argument OR justify proceeding", "3. If revising: use rlmcp_reason with updated argument", "4. If proceeding: explain your reasoning"] :
+                        ["1. Analyze the contradictory evidence above", "2. Decide: revise argument OR justify proceeding", "3. If revising: use atomic_reason with updated argument", "4. If proceeding: explain your reasoning"] :
                         ["Evidence complete and no major conflicts detected", "Argument ready for use"]) :
                       ["1. Provide evidence for missing items", "2. Re-run evidence_gathering with complete evidence"]
                   },
-                  original_rlmcp_analysis: analysis
+                  original_atomic_reason_analysis: atomicReasonAnalysis
                 }, null, 2)
               }]
             };
@@ -784,7 +582,7 @@ text: JSON.stringify({
             content: [{
               type: "text",
               text: JSON.stringify({
-                rlmcp_reason_input: {
+                atomic_reason_input: {
                   goal: goal,
                   actionable_implementation_steps: actionable_implementation_steps,
                   structured_argument: planStructure.argument,
@@ -793,16 +591,18 @@ text: JSON.stringify({
                     implication_requirement: "Each implication must show the logical dependency between concrete steps",
                     conclusion_requirement: "The conclusion should only be reachable through the chain of specific implementation steps"
                   },
-                  plan_to_submit_to_rlmcp_reason: planStructure.argument,
-                  STOP_DO_NOT_CREATE_PLANS_OUTSIDE_THIS_TOOL: "This output IS the complete plan. There must not be any steps in the plan that are not represented in this tool. Every implementation step must be listed as a premise in the structured argument above.",
-                  MANDATORY_NEXT_STEP: "🚨 YOU MUST COPY THE STRUCTURED_ARGUMENT ABOVE AND PASTE IT INTO rlmcp_reason TO VALIDATE IT. DO NOT SKIP THIS STEP.",
+                  MANDATORY_NEXT_STEP: "🚨 YOU MUST USE atomic_reason WITH THE EXACT PARAMETERS BELOW. DO NOT SKIP THIS STEP.",
+                  atomic_reason_step_1: {
+                    step: "extract_atoms",
+                    argument_text: planStructure.argument
+                  },
                   VALIDATION_REQUIRED: {
                     status: "VALIDATION_PENDING",
-                    instruction: "Copy the entire structured_argument text above and use rlmcp_reason tool to validate it. This is MANDATORY.",
-                    argument_to_validate: planStructure.argument,
-                    warning: "The plan is NOT complete until validated with rlmcp_reason"
+                    instruction: "Use atomic_reason tool with step='extract_atoms' and argument_text copied from above. This is MANDATORY.",
+                    exact_call: `atomic_reason(step="extract_atoms", argument_text="${planStructure.argument}")`,
+                    warning: "The plan is NOT complete until validated through atomic_reason workflow"
                   },
-                  critical_warning: "🚨 YOU MUST USE THE TOOLS FROM THIS MCP SERVER. Use prepare_logical_plan then rlmcp_reason. Copy the structured_argument above into rlmcp_reason tool."
+                  critical_warning: "🚨 YOU MUST USE atomic_reason WITH step='extract_atoms' and the argument_text above."
                 }
               }, null, 2)
             }]
@@ -919,7 +719,7 @@ text: JSON.stringify({
           }
         }
 
-        case "rlmcp_help": {
+        case "atomic_help": {
           const { struggling_with } = args as { struggling_with?: string };
 
           const helpContent = {
@@ -1061,11 +861,11 @@ text: JSON.stringify({
                       "Make the logical connection FROM your evidence TO the atom/implication valid."
                     ],
                     instructions: [
-                      "1. Use 'rlmcp_reason' on the sub_argument_text above",
+                      "1. Use 'atomic_reason' on the sub_argument_text above",
                       "2. The argument will likely FAIL validation (logical gap between evidence and conclusion)",
                       "3. Use 'diagnose_gaps' to identify what logical steps are missing",
                       "4. Add missing premises to create a valid logical chain from evidence to conclusion",
-                      "5. Re-run 'rlmcp_reason' until the sub-argument is logically VALID",
+                      "5. Re-run 'atomic_reason' until the sub-argument is logically VALID",
                       "6. Run 'evidence_gathering' to ensure all new premises have evidence",
                       "7. When complete, use 'dig_in' with mode='merge_subargument' to integrate the valid sub-argument back"
                     ],
@@ -1107,7 +907,7 @@ text: JSON.stringify({
                     subargument_premise_count: subPremises.length,
                     total_premise_count: mergedPremises.length,
                     next_steps: [
-                      "1. Run 'rlmcp_reason' on the merged_argument to validate logical structure",
+                      "1. Run 'atomic_reason' on the merged_argument to validate logical structure",
                       "2. Run 'evidence_gathering' to ensure all premises have evidence",
                       "3. Use 'dig_in' again for any remaining logical gaps"
                     ]
@@ -1186,10 +986,10 @@ text: JSON.stringify({
                 role: "user",
                 content: {
                   type: "text",
-                  text: `Before answering "${task}", use the relevance logic tools to:
+                  text: `Before answering "${task}", use the atomic reasoning tools to:
 1. Use formalize_reasoning to convert your initial thoughts into structured logical form
 2. Use structure_argument to organize your reasoning into clear premises and conclusions  
-3. Use validate_argument to ensure your reasoning follows relevance logic principles
+3. Use validate_argument to ensure all premises connect to your conclusion
 4. Use diagnose_gaps if validation fails to identify missing premises
 5. Present your final, logically validated response
 
@@ -1211,7 +1011,7 @@ This ensures all your responses are grounded in rigorous logical reasoning.`
                   type: "text",
                   text: `For the reasoning: "${reasoning}"
 
-AUTOMATICALLY apply these relevance logic tools:
+AUTOMATICALLY apply these atomic reasoning tools:
 1. structure_argument - Convert this reasoning to formal logical structure
 2. validate_argument - Check for connected components and logical validity
 3. diagnose_gaps - If invalid, identify what's missing
@@ -1380,9 +1180,6 @@ EXAMPLE GROUPING:
         logicalConnectives: this.analyzeConnectives(premises, conclusion),
         predicateUsage: this.analyzePredicates(premises, conclusion),
         variableUsage: this.analyzeVariables(premises, conclusion)
-      },
-      relevancePreCheck: {
-        potentialIssues: this.identifyStructuralIssues(premises, conclusion)
       },
       recommendations: this.generateStructuralRecommendations(parsedArg, context)
     };
@@ -1928,8 +1725,8 @@ EXAMPLE GROUPING:
       steps.push("Use diagnose_gaps to identify issues");
     }
     
-    steps.push("Then: Re-run rlmcp_reason");
-    steps.push("Help: Use rlmcp_help if struggling");
+    steps.push("Then: Re-run atomic_reason");
+    steps.push("Help: Use atomic_help if struggling");
     return steps;
   }
 
@@ -2007,14 +1804,14 @@ EXAMPLE GROUPING:
   async run(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error("Relevance Logic MCP server running on stdio");
+    console.error("Atomic Logic MCP server running on stdio");
   }
 }
 
 // Export the class for testing
-export { RelevanceLogicServer };
+export { AtomicLogicServer };
 
-const server = new RelevanceLogicServer();
+const server = new AtomicLogicServer();
 server.run().catch((error) => {
   console.error("Failed to run server:", error);
   process.exit(1);
