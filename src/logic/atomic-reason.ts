@@ -140,28 +140,26 @@ export class AtomicReasonModule {
     premiseFormulas: LogicFormula[],
     conclusionFormula: LogicFormula,
     atom_groupings: Array<{symbol: string, concept_description: string, text_variants: string[]}>
-  ): { premises: string[], conclusion: string, full_argument: string } {
+  ): { premises: string[], conclusion: string } {
     // Create symbol to description mapping
     const symbolToDescription = new Map<string, string>();
     atom_groupings.forEach(group => {
       symbolToDescription.set(group.symbol, group.concept_description);
     });
 
-    // Convert premise formulas to natural language
-    const naturalLanguagePremises = premiseFormulas.map(formula =>
-      this.formulaToNaturalLanguage(formula, symbolToDescription)
-    );
+    // Convert premise formulas to natural language with symbolic format
+    const naturalLanguagePremises = premiseFormulas.map((formula, index) => {
+      const naturalLanguage = this.formulaToNaturalLanguage(formula, symbolToDescription);
+      const symbolicFormat = this.formulaToSymbolicString(formula);
+      return `P${index + 1}: ${naturalLanguage} (${symbolicFormat})`;
+    });
 
     // Convert conclusion formula to natural language
     const naturalLanguageConclusion = this.formulaToNaturalLanguage(conclusionFormula, symbolToDescription);
 
-    // Create full argument text
-    const fullArgument = naturalLanguagePremises.join('. ') + '. Therefore, ' + naturalLanguageConclusion + '.';
-
     return {
       premises: naturalLanguagePremises,
-      conclusion: naturalLanguageConclusion,
-      full_argument: fullArgument
+      conclusion: naturalLanguageConclusion
     };
   }
 
@@ -283,9 +281,9 @@ export class AtomicReasonModule {
         result.message = `${ignoredPremises.length} premise(s) were ignored:\n${ignoredPremises.join('\n')}\n\nOnly symbols from atom_groupings can be used. If you need new symbols, use earlier steps to produce them.`;
       }
 
-      // If validation is successful, generate natural language output
+      // If validation is successful, generate argument for presentation
       if (validation.isValid) {
-        result.natural_language_argument = this.generateNaturalLanguageArgument(
+        result.argument_for_presentation = this.generateNaturalLanguageArgument(
           premiseFormulas,
           conclusionFormula,
           atom_groupings
