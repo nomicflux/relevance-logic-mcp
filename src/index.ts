@@ -131,7 +131,7 @@ class AtomicLogicServer {
           },
           {
             name: "evidence_gathering",
-            description: "Validate evidence AND force analysis of conflicts. Provide evidence_items as ARRAY OF OBJECTS, each object containing: {target, summary, strength (-1 to 1, negative=contradicts, positive=supports, zero=neutral), citation}. Tool will analyze conflicts and present requirements for self-analysis. Only succeeds when ALL evidence complete.",
+            description: "Validate evidence AND force analysis of conflicts. Provide evidence_items as ARRAY OF OBJECTS, each object containing: {target, summary, strength (-1 to 1, negative=contradicts, positive=supports, zero=neutral), citation}. Tool will analyze conflicts and present requirements for self-analysis. Only succeeds when ALL evidence complete. When evidence_gathering returns results, present the premises and evidence in the exact order shown in present_this_order_to_user. Each premise should be immediately followed by its supporting evidence before moving to the next premise.",
             inputSchema: {
               type: "object",
               properties: {
@@ -448,15 +448,19 @@ text: JSON.stringify({
 
             // Extract atoms and implications from atomic_reason output
             const symbolicArgument = atomicReasonAnalysis.symbolic_argument;
-            const atomGroupings = atomicReasonAnalysis.atom_groupings || [];
+            const symbolDefinitions = atomicReasonAnalysis.symbol_definitions || {};
 
-            // Find all atoms and implications that need evidence
+            // Get ALL atoms that need evidence from the argument
             const atomsNeededEvidence = new Set<string>();
             const implicationsNeededEvidence = new Set<string>();
 
-            // Add all atoms from atom_groupings (use concept_description as the evidence target)
-            atomGroupings.forEach((group: any) => {
-              atomsNeededEvidence.add(group.concept_description);
+            // Get atoms from symbol_definitions, but exclude the conclusion atom
+            const conclusionAtom = symbolicArgument.conclusion?.replace(/^C:\s*/, '');
+
+            Object.keys(symbolDefinitions).forEach(atom => {
+              if (atom !== conclusionAtom) {
+                atomsNeededEvidence.add(atom);
+              }
             });
 
             // Add all premises as implications needing evidence (use the symbolic form)
@@ -470,7 +474,7 @@ text: JSON.stringify({
               });
             }
 
-            // Check if every atom and implication has complete enhanced evidence
+            // Check if every atom and implication has complete evidence
             const missingEvidence: string[] = [];
             const allRequiredItems = [...Array.from(atomsNeededEvidence), ...Array.from(implicationsNeededEvidence)];
 
@@ -486,94 +490,113 @@ text: JSON.stringify({
             // Analyze conflicts - tool detects contradictory evidence
             const contradictoryEvidence = evidence_items.filter(item => item.strength < 0);
 
-            // Only succeed if ALL evidence complete AND no major conflicts unaddressed
+            // Succeed if ALL evidence complete - conflicts are separate concern
             const hasConflicts = contradictoryEvidence.length > 0;
-            const finalSuccess = allEvidenceComplete && !hasConflicts;
+            const finalSuccess = allEvidenceComplete;
 
-            // Build argument summary with grouped evidence
-            const logicalFlow: any[] = [];
 
-            // Add base premises (atomic symbols) first
-            atomGroupings.forEach((group: any) => {
-              const evidence = evidence_items.filter(e => e.target === group.concept_description);
-              logicalFlow.push({
-                type: "premise",
-                statement: group.concept_description,
-                symbol: group.symbol,
-                supporting_evidence: evidence.map(e => ({
-                  summary: e.summary,
-                  strength: e.strength,
-                  citation: e.citation
-                }))
-              });
-            });
+            // Create presentation order based on first appearance in premises
+            const assignedEvidence = new Set<string>();
+            const presentationOrder: any[] = [];
 
-            // Add implications second
             if (symbolicArgument && symbolicArgument.premises) {
               symbolicArgument.premises.forEach((premise: string) => {
                 const cleanPremise = premise.replace(/^P\d+:\s*/, '');
+                const premiseNumber = premise.match(/^P(\d+):/)?.[1] || '';
+
+                const evidenceForThisPremise: any[] = [];
+
+                // Check for exact implication match first
                 if (cleanPremise.includes('→') || cleanPremise.includes('∧') || cleanPremise.includes('∨')) {
-                  const evidence = evidence_items.filter(e => e.target === cleanPremise);
-                  logicalFlow.push({
-                    type: "implication",
-                    statement: cleanPremise,
-                    symbol: cleanPremise,
-                    supporting_evidence: evidence.map(e => ({
-                      summary: e.summary,
-                      strength: e.strength,
-                      citation: e.citation
-                    }))
-                  });
+                  const implicationEvidence = evidence_items.filter(e => e.target === cleanPremise);
+                  if (implicationEvidence.length > 0 && !assignedEvidence.has(cleanPremise)) {
+                    evidenceForThisPremise.push({
+                      type: 'implication',
+                      target: cleanPremise,
+                      evidence: implicationEvidence
+                    });
+                    assignedEvidence.add(cleanPremise);
+                  }
                 }
+
+                // Check for atoms in this premise (prefer lone atoms)
+                const atoms = cleanPremise.match(/[A-Z_]+/g) || [];
+
+                // First, check if this premise is a lone atom
+                if (atoms.length === 1 && cleanPremise === atoms[0]) {
+                  const atomEvidence = evidence_items.filter(e => e.target === atoms[0]);
+                  if (atomEvidence.length > 0 && !assignedEvidence.has(atoms[0])) {
+                    evidenceForThisPremise.push({
+                      type: 'atom',
+                      target: atoms[0],
+                      definition: symbolDefinitions[atoms[0]],
+                      evidence: atomEvidence
+                    });
+                    assignedEvidence.add(atoms[0]);
+                  }
+                }
+
+                // Then check for atoms in conjunctions/disjunctions/implications
+                atoms.forEach(atom => {
+                  if (!assignedEvidence.has(atom)) {
+                    const atomEvidence = evidence_items.filter(e => e.target === atom);
+                    if (atomEvidence.length > 0) {
+                      evidenceForThisPremise.push({
+                        type: 'atom',
+                        target: atom,
+                        definition: symbolDefinitions[atom],
+                        evidence: atomEvidence
+                      });
+                      assignedEvidence.add(atom);
+                    }
+                  }
+                });
+
+                presentationOrder.push({
+                  premise: premise,
+                  premise_number: premiseNumber,
+                  premise_formula: cleanPremise,
+                  evidence_items: evidenceForThisPremise
+                });
               });
             }
+
+            // Add conclusion
+            presentationOrder.push({
+              conclusion: symbolicArgument.conclusion,
+              conclusion_symbol: conclusionAtom,
+              conclusion_definition: symbolDefinitions[conclusionAtom || '']
+            });
 
             return {
               content: [{
                 type: "text",
                 text: JSON.stringify({
-                  argument_summary: {
-                    logical_flow: logicalFlow,
-                    conclusion: {
-                      statement: symbolicArgument.conclusion?.replace(/^C:\s*/, '') || "Unknown",
-                      symbol: symbolicArgument.conclusion?.replace(/^C:\s*/, '') || "Unknown"
-                    }
-                  },
-                  evidence_analysis: {
-                    success: finalSuccess,
-                    evidence_completeness: {
-                      status: allEvidenceComplete ? "COMPLETE" : "INCOMPLETE",
-                      required_items: allRequiredItems.length,
-                      provided_items: allRequiredItems.length - missingEvidence.length,
-                      missing_items: missingEvidence
-                    },
-                    conflict_analysis: {
-                      contradictory_evidence_detected: hasConflicts,
-                      contradictory_items: contradictoryEvidence.map(item => ({
+                  ...(hasConflicts && {
+                    "🚨 CONTRADICTORY_EVIDENCE_DETECTED": {
+                      conflicting_evidence: contradictoryEvidence.map(item => ({
                         target: item.target,
                         summary: item.summary,
                         strength: item.strength,
                         citation: item.citation
                       })),
-                      conflict_count: contradictoryEvidence.length
-                    },
-                    requirements_for_self_analysis: {
-                      must_answer: [
+                      REQUIRED_CONFRONTATION: [
                         "Did you find any evidence that contradicts your claims? (YES/NO)",
                         "Should you revise your argument based on the evidence? (YES/NO)",
-                        hasConflicts ? "You have contradictory evidence - explain why you should proceed or how you will revise" : "Justify proceeding with this argument"
-                      ],
-                      decision_required: hasConflicts ?
-                        "🚨 CONFLICTS DETECTED: You must either revise your argument or explicitly justify proceeding despite contradictory evidence" :
-                        allEvidenceComplete ?
-                          "Evidence complete - proceed or revise based on your analysis" :
-                          "Provide missing evidence before proceeding"
-                    },
-                    next_steps: allEvidenceComplete ?
-                      (hasConflicts ?
-                        ["1. Analyze the contradictory evidence above", "2. Decide: revise argument OR justify proceeding", "3. If revising: use atomic_reason with updated argument", "4. If proceeding: explain your reasoning"] :
-                        ["Evidence complete and no major conflicts detected", "Argument ready for use"]) :
-                      ["1. Provide evidence for missing items", "2. Re-run evidence_gathering with complete evidence"]
+                        "You have contradictory evidence - explain why you should proceed or how you will revise"
+                      ]
+                    }
+                  }),
+                  present_this_order_to_user: {
+                    presentation_instructions: "Present the premises and evidence in the exact order shown below. Each premise should be immediately followed by its supporting evidence before moving to the next premise.",
+                    argument_flow: presentationOrder
+                  },
+                  evidence_validation: {
+                    status: finalSuccess ? "VALID" : "INVALID",
+                    evidence_complete: allEvidenceComplete,
+                    missing_evidence: missingEvidence,
+                    total_required: allRequiredItems.length,
+                    total_provided: allRequiredItems.length - missingEvidence.length
                   },
                   original_atomic_reason_analysis: atomicReasonAnalysis
                 }, null, 2)
