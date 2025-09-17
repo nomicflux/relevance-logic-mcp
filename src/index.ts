@@ -246,33 +246,24 @@ class AtomicLogicServer {
           },
           {
             name: "dig_in",
-            description: "[USER-INITIATED ONLY] When user says 'dig in to [atom/implication]': take the evidence already provided for that atom/implication as the new premise, take the atom/implication as the new conclusion, build valid logical chain between them. Example: If evidence 'Studies show correlation between smoking and lung disease' was provided for atom 'JS_MAINTENANCE_HARD', this creates sub-argument: P1: 'Studies show correlation between smoking and lung disease', C: 'JS_MAINTENANCE_HARD'. You must add missing logical steps to make this valid, then merge back into original structured argument (atomic_reason JSON output).",
+            description: "[USER-INITIATED ONLY] When user says 'dig in to [atom/implication]': take the evidence already provided for that atom/implication as the new premise, take the atom/implication as the new conclusion, build valid logical chain between them. Example: If evidence 'Studies show correlation between smoking and lung disease' was provided for atom 'JS_MAINTENANCE_HARD', this creates sub-argument: P1: 'Studies show correlation between smoking and lung disease', C: 'JS_MAINTENANCE_HARD'. You must add missing logical steps to make this valid to strengthen your argument.",
             inputSchema: {
               type: "object",
               properties: {
-                mode: {
-                  type: "string",
-                  enum: ["setup", "merge_subargument"],
-                  description: "setup: Create new sub-argument. merge_subargument: Merge completed sub-argument back."
-                },
                 evidence_becomes_premise: {
                   type: "string",
-                  description: "THE EVIDENCE TEXT ALREADY PROVIDED - this becomes the NEW PREMISE in the sub-argument. Example: 'Studies show correlation between smoking and lung disease' (required for setup mode)"
+                  description: "THE EVIDENCE TEXT ALREADY PROVIDED - this becomes the NEW PREMISE in the sub-argument. Example: 'Studies show correlation between smoking and lung disease'"
                 },
                 original_atom_becomes_conclusion: {
                   type: "string",
-                  description: "THE ATOM OR IMPLICATION this evidence was provided for - this becomes the NEW CONCLUSION in the sub-argument. Example: 'JS_MAINTENANCE_HARD' (required for setup mode)"
+                  description: "THE ATOM OR IMPLICATION this evidence was provided for - this becomes the NEW CONCLUSION in the sub-argument. Example: 'JS_MAINTENANCE_HARD'"
                 },
                 original_argument: {
                   type: "string",
-                  description: "The original structured argument as atomic_reason JSON output (required for merge_subargument mode)"
-                },
-                completed_subargument: {
-                  type: "string",
-                  description: "The completed logically valid sub-argument as atomic_reason JSON output (required for merge_subargument mode)"
+                  description: "The original structured argument as atomic_reason JSON output (for reference)"
                 }
               },
-              required: ["mode", "evidence_becomes_premise", "original_atom_becomes_conclusion", "original_argument", "completed_subargument"],
+              required: ["evidence_becomes_premise", "original_atom_becomes_conclusion", "original_argument"],
               additionalProperties: false
             }
           },
@@ -900,126 +891,53 @@ text: JSON.stringify({
         }
 
         case "dig_in": {
-          const { mode, evidence_becomes_premise, original_atom_becomes_conclusion, original_argument, completed_subargument } = args as {
-            mode: "setup" | "merge_subargument";
-            evidence_becomes_premise?: string;
-            original_atom_becomes_conclusion?: string;
-            original_argument?: string;
-            completed_subargument?: string;
+          const { evidence_becomes_premise, original_atom_becomes_conclusion, original_argument } = args as {
+            evidence_becomes_premise: string;
+            original_atom_becomes_conclusion: string;
+            original_argument: string;
           };
 
-          if (mode === "setup") {
-            if (!evidence_becomes_premise || !original_atom_becomes_conclusion) {
-              throw new Error("evidence_becomes_premise and original_atom_becomes_conclusion are required for setup mode");
-            }
-
-            // Validation: Reject if same text used for both premise and conclusion
-            if (evidence_becomes_premise.trim() === original_atom_becomes_conclusion.trim()) {
-              throw new Error("evidence_becomes_premise and original_atom_becomes_conclusion cannot be the same text");
-            }
-
-            // Create sub-argument: evidence becomes premise, atom/implication becomes conclusion
-            const subArgumentText = `${evidence_becomes_premise}. Therefore, ${original_atom_becomes_conclusion}.`;
-
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  setup_result: {
-                    atomic_reason_input: {
-                      step: "extract_atoms",
-                      argument_text: subArgumentText
-                    },
-                    explanation: [
-                      "The evidence you already provided has become the PREMISE of this NEW sub-argument.",
-                      "The atom/implication has become the CONCLUSION of this NEW sub-argument.",
-                      "Make the logical connection FROM your evidence TO the atom/implication valid."
-                    ],
-                    instructions: [
-                      "1. Use 'atomic_reason' with the exact input above",
-                      "2. Follow the 3-step atomic_reason workflow (extract_atoms → group_atoms → build_symbolic_argument)",
-                      "3. The argument will likely FAIL validation (logical gap between evidence and conclusion)",
-                      "4. Add missing premises to create a valid logical chain from evidence to conclusion",
-                      "5. Re-run 'atomic_reason' step 3 until the sub-argument is logically VALID",
-                      "6. When complete, use 'dig_in' with mode='merge_subargument' to integrate the valid sub-argument back"
-                    ],
-                    evidence_now_premise: evidence_becomes_premise,
-                    atom_implication_now_conclusion: original_atom_becomes_conclusion
-                  }
-                }, null, 2)
-              }]
-            };
-
-          } else if (mode === "merge_subargument") {
-            if (!original_argument || !completed_subargument) {
-              throw new Error("original_argument and completed_subargument are required for merge_subargument mode");
-            }
-
-            let subPremises: string[] = [];
-
-            // Parse completed_subargument as atomic_reason JSON output
-            const atomicReasonOutput = JSON.parse(completed_subargument);
-            if (!atomicReasonOutput.argument_for_presentation || !atomicReasonOutput.argument_for_presentation.premises) {
-              throw new Error("completed_subargument must be atomic_reason JSON output with argument_for_presentation.premises");
-            }
-            subPremises = atomicReasonOutput.argument_for_presentation.premises;
-
-            // Use the structured original argument directly (not a string to parse)
-            const originalArgumentStructured = JSON.parse(original_argument);
-            const originalPremises = originalArgumentStructured.argument_for_presentation?.premises || [];
-
-            // Merge: Add sub-argument premises to the original argument
-            const mergedPremises = [...subPremises, ...originalPremises];
-
-            // Create proper structured argument format (like atomic_reason output)
-            const mergedStructuredArgument = {
-              validation_result: "VALID",
-              symbolic_argument: originalArgumentStructured.symbolic_argument ? {
-                ...originalArgumentStructured.symbolic_argument,
-                premises: [...(atomicReasonOutput.symbolic_argument?.premises || []), ...(originalArgumentStructured.symbolic_argument.premises || [])]
-              } : undefined,
-              symbol_definitions: {
-                ...originalArgumentStructured.symbol_definitions,
-                ...atomicReasonOutput.symbol_definitions
-              },
-              argument_for_presentation: {
-                premises: mergedPremises,
-                conclusion: originalArgumentStructured.argument_for_presentation?.conclusion || originalArgumentStructured.symbolic_argument?.conclusion
-              },
-              atom_groupings: [
-                ...(originalArgumentStructured.atom_groupings || []),
-                ...(atomicReasonOutput.atom_groupings || [])
-              ]
-            };
-
-            // Create argument text for atomic_reason validation
-            const mergedArgumentText = mergedPremises.map((p, i) => `Premise ${i + 1}: ${p}`).join('\n') +
-              `\nConclusion: ${originalArgumentStructured.argument_for_presentation?.conclusion || 'Unknown conclusion'}`;
-
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  integration_result: {
-                    merged_argument_for_atomic_reason: mergedArgumentText,
-                    merged_structured_argument: mergedStructuredArgument,
-                    integration_summary: `Merged ${subPremises.length} premises from sub-argument into original argument`,
-                    original_premise_count: originalPremises.length,
-                    subargument_premise_count: subPremises.length,
-                    total_premise_count: mergedPremises.length,
-                    next_steps: [
-                      "1. Run 'atomic_reason' on merged_argument_for_atomic_reason to validate no merge conflicts",
-                      "2. Use 'evidence_gathering' to ensure all premises have evidence",
-                      "3. Use 'dig_in' again for any remaining logical gaps"
-                    ]
-                  }
-                }, null, 2)
-              }]
-            };
-
-          } else {
-            throw new Error(`Invalid mode: ${mode}. Must be 'setup' or 'merge_subargument'`);
+          if (!evidence_becomes_premise || !original_atom_becomes_conclusion) {
+            throw new Error("evidence_becomes_premise and original_atom_becomes_conclusion are required");
           }
+
+          // Validation: Reject if same text used for both premise and conclusion
+          if (evidence_becomes_premise.trim() === original_atom_becomes_conclusion.trim()) {
+            throw new Error("evidence_becomes_premise and original_atom_becomes_conclusion cannot be the same text");
+          }
+
+          // Create sub-argument: evidence becomes premise, atom/implication becomes conclusion
+          const subArgumentText = `${evidence_becomes_premise}. Therefore, ${original_atom_becomes_conclusion}.`;
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dig_in_result: {
+                  atomic_reason_input: {
+                    step: "extract_atoms",
+                    argument_text: subArgumentText
+                  },
+                  explanation: [
+                    "The evidence you already provided has become the PREMISE of this NEW sub-argument.",
+                    "The atom/implication has become the CONCLUSION of this NEW sub-argument.",
+                    "Make the logical connection FROM your evidence TO the atom/implication valid."
+                  ],
+                  instructions: [
+                    "1. Use 'atomic_reason' with the exact input above",
+                    "2. Follow the 3-step atomic_reason workflow (extract_atoms → group_atoms → build_symbolic_argument)",
+                    "3. The argument will likely FAIL validation (logical gap between evidence and conclusion)",
+                    "4. Add missing premises to create a valid logical chain from evidence to conclusion",
+                    "5. Re-run 'atomic_reason' step 3 until the sub-argument is logically VALID",
+                    "6. When complete, you have successfully 'dug in' to strengthen this part of your argument"
+                  ],
+                  evidence_now_premise: evidence_becomes_premise,
+                  atom_implication_now_conclusion: original_atom_becomes_conclusion,
+                  original_argument_reference: original_argument
+                }
+              }, null, 2)
+            }]
+          };
         }
 
         default:
