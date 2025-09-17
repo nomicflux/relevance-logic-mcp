@@ -246,7 +246,7 @@ class AtomicLogicServer {
           },
           {
             name: "dig_in",
-            description: "[USER-INITIATED ONLY] When user says 'dig in to [atom/implication]': take the evidence already provided for that atom/implication as the new premise, take the atom/implication as the new conclusion, build valid logical chain between them. Example: If evidence 'Studies show correlation between smoking and lung disease' was provided for atom 'JS_MAINTENANCE_HARD', this creates sub-argument: P1: 'Studies show correlation between smoking and lung disease', C: 'JS_MAINTENANCE_HARD'. You must add missing logical steps to make this valid, then merge back into original argument.",
+            description: "[USER-INITIATED ONLY] When user says 'dig in to [atom/implication]': take the evidence already provided for that atom/implication as the new premise, take the atom/implication as the new conclusion, build valid logical chain between them. Example: If evidence 'Studies show correlation between smoking and lung disease' was provided for atom 'JS_MAINTENANCE_HARD', this creates sub-argument: P1: 'Studies show correlation between smoking and lung disease', C: 'JS_MAINTENANCE_HARD'. You must add missing logical steps to make this valid, then merge back into original structured argument (atomic_reason JSON output).",
             inputSchema: {
               type: "object",
               properties: {
@@ -265,7 +265,7 @@ class AtomicLogicServer {
                 },
                 original_argument: {
                   type: "string",
-                  description: "The original full argument text (required for merge_subargument mode)"
+                  description: "The original structured argument as atomic_reason JSON output (required for merge_subargument mode)"
                 },
                 completed_subargument: {
                   type: "string",
@@ -598,7 +598,8 @@ text: JSON.stringify({
                     total_required: allRequiredItems.length,
                     total_provided: allRequiredItems.length - missingEvidence.length
                   },
-                  original_atomic_reason_analysis: atomicReasonAnalysis
+                  original_atomic_reason_analysis: atomicReasonAnalysis,
+                  PRESENTATION_SUMMARY: `Present ${presentationOrder.filter(item => item.premise).length} premises with their supporting evidence, followed by ${presentationOrder.filter(item => item.premise && item.evidence_items.some((e: any) => e.type === 'implication')).length} implications with their supporting evidence, followed by the conclusion.`
                 }, null, 2)
               }]
             };
@@ -963,30 +964,52 @@ text: JSON.stringify({
             }
             subPremises = atomicReasonOutput.argument_for_presentation.premises;
 
-            // Parse the original argument
-            const originalArg = this.parser.parseArgument(original_argument);
-            const originalPremises = originalArg.premises.map((p: any) => p.originalText);
+            // Use the structured original argument directly (not a string to parse)
+            const originalArgumentStructured = JSON.parse(original_argument);
+            const originalPremises = originalArgumentStructured.argument_for_presentation?.premises || [];
 
             // Merge: Add sub-argument premises to the original argument
             const mergedPremises = [...subPremises, ...originalPremises];
 
-            // Reconstruct the expanded argument
-            const mergedArgument = mergedPremises.map((p, i) => `Premise ${i + 1}: ${p}`).join('\n') +
-              `\nConclusion: ${originalArg.conclusion.originalText}`;
+            // Create proper structured argument format (like atomic_reason output)
+            const mergedStructuredArgument = {
+              validation_result: "VALID",
+              symbolic_argument: originalArgumentStructured.symbolic_argument ? {
+                ...originalArgumentStructured.symbolic_argument,
+                premises: [...(atomicReasonOutput.symbolic_argument?.premises || []), ...(originalArgumentStructured.symbolic_argument.premises || [])]
+              } : undefined,
+              symbol_definitions: {
+                ...originalArgumentStructured.symbol_definitions,
+                ...atomicReasonOutput.symbol_definitions
+              },
+              argument_for_presentation: {
+                premises: mergedPremises,
+                conclusion: originalArgumentStructured.argument_for_presentation?.conclusion || originalArgumentStructured.symbolic_argument?.conclusion
+              },
+              atom_groupings: [
+                ...(originalArgumentStructured.atom_groupings || []),
+                ...(atomicReasonOutput.atom_groupings || [])
+              ]
+            };
+
+            // Create argument text for atomic_reason validation
+            const mergedArgumentText = mergedPremises.map((p, i) => `Premise ${i + 1}: ${p}`).join('\n') +
+              `\nConclusion: ${originalArgumentStructured.argument_for_presentation?.conclusion || 'Unknown conclusion'}`;
 
             return {
               content: [{
                 type: "text",
                 text: JSON.stringify({
                   integration_result: {
-                    merged_argument: mergedArgument,
+                    merged_argument_for_atomic_reason: mergedArgumentText,
+                    merged_structured_argument: mergedStructuredArgument,
                     integration_summary: `Merged ${subPremises.length} premises from sub-argument into original argument`,
                     original_premise_count: originalPremises.length,
                     subargument_premise_count: subPremises.length,
                     total_premise_count: mergedPremises.length,
                     next_steps: [
-                      "1. Run 'atomic_reason' on the merged_argument to validate logical structure",
-                      "2. Run 'evidence_gathering' to ensure all premises have evidence",
+                      "1. Run 'atomic_reason' on merged_argument_for_atomic_reason to validate no merge conflicts",
+                      "2. Use 'evidence_gathering' to ensure all premises have evidence",
                       "3. Use 'dig_in' again for any remaining logical gaps"
                     ]
                   }
